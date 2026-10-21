@@ -19,7 +19,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 FIRMWARE = os.path.join(HERE, "..", "obsidian_esp32")
 WAVETABLES = "/Applications/NanoStudio 2.app/Wrapper/NanoStudio 2.app/WaveTables"
 
-ANALOG_WAVES = {"Sine": "kSine", "Tri": "kTri", "Saw": "kSaw", "Square": "kSquare", "Pulse": "kPulse"}
+ANALOG_WAVES = {"Sine": "kSine", "Tri": "kTri", "Saw": "kSaw", "Square": "kSquare", "Pulse": "kPulse", "Bi-Pulse": "kBiPulse"}
 NOISE_TYPES = {"White": "kNoiseWhite", "Low Passed": "kNoiseLowPass", "High Passed": "kNoiseHighPass",
                "Band Passed": "kNoiseBandPass", "Notched": "kNoiseNotch"}
 FILTER_TYPES = {"LP 24-A": "kFilterLP24A", "LP 12-D": "kFilterLP12D", "LP 12-A": "kFilterLP12A",
@@ -113,7 +113,7 @@ OSC_PARAMS = {"Pitch Coarse": "kDstOscPitch", "Pitch Fine": "kDstOscFine", "Leve
               "FM OP2 Out": "dstFmConn(6)", "FM OP3 Out": "dstFmConn(7)", "FM OP1 Freq": "dstFmRatio(0)",
               "FM OP2 Freq": "dstFmRatio(1)", "FM OP3 Freq": "dstFmRatio(2)",
               "NanoSaw Detune": "kDstNsDetune", "NanoSaw Mix": "kDstNsMix", "PD Phase Dist": "kDstPdDist",
-              "An Pulse Width": "kDstPulseWidth"}
+              "An Pulse Width": "kDstPulseWidth", "Phase": "kDstOscPhase"}
 PD_WAVES = {"Saw": "kPdSaw", "Square": "kPdSquare", "Pulse": "kPdPulse", "Double Sine": "kPdDoubleSine",
             "Saw Pulse": "kPdSawPulse", "Res Saw": "kPdResSaw", "Res Fat Saw": "kPdResFatSaw",
             "Res Tri": "kPdResTri", "Res Tri HP": "kPdResTriHP"}
@@ -205,7 +205,7 @@ class Converter:
             if wave not in ANALOG_WAVES:
                 self.unsupported(where, f"Analog Wave={wave} not supported, using Square (PWM={a.get('PWM')} ignored)")
             self.emit(f"{q}.type = kOscWave; {q}.wave = {ANALOG_WAVES.get(wave, 'kSquare')};"
-                      + (f" {q}.pulseWidth = {f(num(a.get('PWM')))};" if wave == "Pulse" else ""))
+                      + (f" {q}.pulseWidth = {f(num(a.get('PWM')))};" if wave in ("Pulse", "Bi-Pulse") else ""))
             if a.get("Sync", "OFF").upper() != "OFF":  # older presets write "Off"
                 # Not a plain hard sync: NS2 at SRat 0.5 keeps the fundamental and adds highs (10-porting-notes.md).
                 self.unsupported(where, f"Sync={a.get('Sync')} not mapped")

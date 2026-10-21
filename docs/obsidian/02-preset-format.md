@@ -100,6 +100,12 @@ nivel *= scale[N]
 desafinadas (`UDtn` 0.3), NS2 suena al mismo nivel que con una (0.85² · √2 ≈ 1, 0.7² · √4 ≈ 1).
 Con `scale` lineal, el port salía 1.6 dB más fuerte con 2 voces.
 
+**Ley de paneo [P]**: en NS2, `USte` no cambia el nivel de la suma mono (2 y 4 voces con
+`USte` 1 y 0.5 suenan como con 0), y un oscilador paneado a cualquier lado tampoco. O sea
+que la ley es de suma constante, `L = 2·(1 − pan)` y `R = 2·pan`, y no de balance. El port
+la usa para el unísono. Para el `Pan` de los filtros sigue con la ley de balance (unidad en
+el centro), porque In Lazy Curls, con F1 y F2 paneados a los extremos, solo coincide así.
+
 Con `UDtn = 1` y 2 voces el detune es ±1.4 semitonos; con valores típicos (0.1–0.3) es de
 pocos cents. La ley de paneo **[?]**.
 

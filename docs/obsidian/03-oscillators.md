@@ -84,6 +84,10 @@ Reparto por `Type` (switch en el mismo orden que el manual):
   distinto, y cambian la suma con otros osciladores y la FM.
 - Por lo tanto **el antialiasing son los mipmaps** de la tabla (44 niveles, 4 por octava,
   ver [08-wavetable-format.md](08-wavetable-format.md)). No hay BLEP.
+- **Bi-Pulse medido [P]**: es una onda de tres niveles, con un pulso positivo de ancho `PWM`
+  al principio del ciclo, uno negativo medio ciclo después y cero entre medio, así que no
+  tiene armónicos pares. El port la arma como la Pulse menos ella misma desplazada medio
+  ciclo, con la mitad de la ganancia de la Pulse (nivel y espectro de NS2 con PWM 0.23).
 - **Pulse (4)** y **Bi-Pulse (5)** usan `pw = clamp(PWM + mod, …)` sobre el mismo motor,
   con constantes propias (Pulse: 0.58 y una ganancia de 2/3; Bi-Pulse: 0.5 y 1). Lo más
   probable es que salgan como resta de dos lecturas de sierra desfasadas en `pw` **[I]**.
@@ -272,6 +276,10 @@ autofeedback, así que se puede calcular en un solo paso.
   `O3O` en decay 1.5 s y sustain 0, llega a silencio digital en 1.5 s con la tecla apretada.
   El port usa `e = Levl + (1 − Levl) · envolvente`. Con eso FM Stoned Keys, House Pluck
   Bass, Hang Drum y Ef Em Crystal Keys coinciden con NS2 en nivel, envolvente y armónicos.
+  Las salidas `O1O..O3O` con cantidades intermedias (0.25, 0.5, dos portadoras a la vez) y
+  los operadores Saw Up/Saw Down como portadoras coinciden con NS2 **[P]**. El feedback sobre
+  un operador Saw Down (`O11` 0.5) deja la salida 5 dB más baja en NS2 con el mismo
+  espectro; en el port no cambia el nivel **[?]**.
   Tests con `O3O` en decay 0.6 s y sustain 0 confirman la fórmula con `Levl` 0.5 y 1
   (coinciden exacto) **[P]**. Con `Levl` 0, NS2 decae igual hasta 100 ms, pero después queda
   una cola de −35 a −40 dB que el port baja a −56. Puede ser el limitador de ±6 unidades por

@@ -22,7 +22,7 @@ constexpr int kTableLen = 1024;
 constexpr int kMips = 11;
 constexpr float kMipBaseHz = 20.0f;
 
-enum Wave { kSine, kTri, kSaw, kSquare, kPulse };
+enum Wave { kSine, kTri, kSaw, kSquare, kPulse, kBiPulse };
 constexpr int kWaveCount = 4;  // band-limited tables; the pulse is read from the saw's
 enum OscType { kOscWave, kOscTable, kOscNoise, kOscSample, kOscFM, kOscNanoSaw, kOscPD };
 enum PdWave { kPdSaw, kPdSquare, kPdPulse, kPdDoubleSine, kPdSawPulse, kPdResSaw, kPdResFatSaw, kPdResTri, kPdResTriHP };
@@ -67,6 +67,7 @@ enum ModDest : int8_t {
   kDstFmRatio = kDstFmConn + kFmConns, // FM operator ratios (FM OPn Freq), 3 of them
   kDstNsDetune = kDstFmRatio + 3, kDstNsMix, kDstPdDist,  // NanoSaw Detune/Mix, PD Phase Dist
   kDstPulseWidth,                      // An Pulse Width
+  kDstOscPhase,                        // Phase: shifts the running oscillator, 1 = a full cycle
   kDstCutoff, kDstCutoffSlow, kDstQ, kDstFilterGain, kDstDrive,
   kDstAmpGain,
   kDstCutoff2, kDstQ2, kDstFilterGain2, kDstDrive2,  // Filter 2
@@ -668,6 +669,19 @@ struct Osc {
     return (a + (b - a) * frac) * (1.0f / 32768.0f);
   }
   // A pulse of width `width` (cycles) as the difference of two band-limited saw reads.
+  // Bi-Pulse: a positive pulse of the width at the start of the cycle and a negative one half a
+  // cycle later, zero in between (the shape of NS2's renders): the pulse minus itself shifted.
+  inline float tickBiPulse(const int16_t* saw, uint32_t width) {
+    auto at = [&](uint32_t p) {
+      const float fr = (float)((p >> 6) & 0xffff) * (1.0f / 65536.0f);
+      const uint32_t i = p >> 22;
+      return saw[i] + (saw[i + 1] - saw[i]) * fr;
+    };
+    const uint32_t p1 = phase + 0x80000000u;
+    const float a = at(p1 - width) - at(p1), b = at(phase - width) - at(phase);
+    phase += inc;
+    return (a - b) * (1.0f / 32768.0f);
+  }
   // Starts on the narrow positive part, like NS2: reads the rising saw half a cycle ahead.
   inline float tickPulse(const int16_t* saw, uint32_t width) {
     const uint32_t p1 = phase + 0x80000000u, p2 = p1 - width;
@@ -1391,6 +1405,15 @@ struct Voice {
   float oscGain[3] = {1, 1, 1};  // velocity layer/split gains (velocityGains)
   float posPrev[3] = {-1, -1, -1};  // wavetable position at the end of the previous block
   float levPrev[3] = {-1, -1, -1};  // oscillator level at the end of the previous block
+  float phasePrev[3] = {};           // Osc Phase modulation of the previous block
+
+  void shiftPhase(int i, float cycles) {
+    const uint32_t d = (uint32_t)(int64_t)(cycles * 4294967296.0);
+    osc[i].phase += d;
+    for (uint32_t& ph : fm[i].ph) ph += d;
+    for (uint32_t& ph : nano[i].ph) ph += d;
+    pd[i].ph += d;
+  }
   uint32_t age = 0;
 
   bool active() const { return env[0].stage != Envelope::kIdle; }
@@ -1400,6 +1423,7 @@ struct Voice {
     for (int e = 0; e < kEnvs; e++) envSc[e] = envScale(envPatch(p, e), n, vel);
     for (float& pp : posPrev) pp = -1.0f;
     for (float& lp : levPrev) lp = -1.0f;
+    for (float& pp : phasePrev) pp = 0.0f;
     note = n;
     velocity = vel;
     for (float& r : rand) r = Lfo::uniform(1.0f);
@@ -1523,6 +1547,10 @@ struct Voice {
       bool feedsRing = i < 2 && p.osc[i + 1].enabled && ring[i + 1] > 0.0f;
       run[i] = op.enabled && oscGain[i] > 0.0f && (lev[i] != 0.0f || levPrev[i] > 0.0f || feedsRing);
       if (!run[i]) continue;
+      // Osc Phase from the matrix moves the phase by the change of its value [I]: Rand -> Phase
+      // starts each note's oscillators at their own phase, so stacked ones no longer add up in phase.
+      const float po = om[i][kDstOscPhase];
+      if (po != phasePrev[i]) { shiftPhase(i, po - phasePrev[i]); phasePrev[i] = po; }
       float oscPitch = 60.0f + (pitch - 60.0f) * op.keyTrack + detune + op.transpose + op.fine +
                        kPitchCoarseRange * om[i][kDstOscPitch] + kPitchFineRange * om[i][kDstOscFine];
       float* r = raw[i];
@@ -1577,6 +1605,12 @@ struct Voice {
         const float g = gBank->scale[kSaw][mip] * 0.58f;
         const uint32_t width = (uint32_t)(pw * 4294967295.0f);
         for (int n = 0; n < kBlock; n++) r[n] = osc[i].tickPulse(gBank->table[kSaw][mip], width) * g;
+      } else if (op.wave == kBiPulse) {
+        const float pw = fminf(fmaxf(op.pulseWidth + om[i][kDstPulseWidth], 0.01f), 0.49f);
+        // Half the pulse's gain: NS2's level and spectrum at PWM 0.23 [P].
+        const float g = gBank->scale[kSaw][mip] * 0.29f;
+        const uint32_t width = (uint32_t)(pw * 4294967295.0f);
+        for (int n = 0; n < kBlock; n++) r[n] = osc[i].tickBiPulse(gBank->table[kSaw][mip], width) * g;
       } else {
         const int16_t* tab = gBank->table[op.wave][mip];
         const float g = gBank->scale[op.wave][mip];
@@ -1620,7 +1654,8 @@ struct Voice {
     }
     if (series) memset(bus1, 0, sizeof(bus1));
     const float p1 = p.filterPan, p2 = p.f2.pan;
-    // Linear balance law, unity at the centre, as for the unison pan.
+    // Linear balance law, unity at the centre: In Lazy Curls (F1 and F2 panned hard apart) matches
+    // NS2 with it.
     auto panL = [](float x) { return x < 0.5f ? 1.0f : 2.0f * (1.0f - x); };
     auto panR = [](float x) { return x > 0.5f ? 1.0f : 2.0f * x; };
     const float l1 = gainL * panL(p1), r1 = gainR * panR(p1), l2 = gainL * panL(p2), r2 = gainR * panR(p2);
@@ -2030,11 +2065,11 @@ struct Engine {
     v.detune = kDet[n][u] * d * d * (1.0f + 0.2f * n);
     float pan = Noise::clamp01(0.5f + kPan[n][u] * Noise::clamp01(patch.unisonStereo));
     // The level scale counts squared, like the amplitude it scales: 2 detuned voices sum to the
-    // level of one in NS2 renders (0.85^2 * sqrt 2 = 1.02). Linear balance law, unity at the
-    // centre (NS2's pan law is [?]).
+    // level of one in NS2 renders (0.85^2 * sqrt 2 = 1.02). Constant-sum pan law: L + R stays 2,
+    // as in NS2 renders, where an oscillator panned anywhere keeps the mono sum's level [P].
     const float g = kScale[n] * kScale[n];
-    v.gainL = g * (pan < 0.5f ? 1.0f : 2.0f * (1.0f - pan));
-    v.gainR = g * (pan > 0.5f ? 1.0f : 2.0f * pan);
+    v.gainL = g * 2.0f * (1.0f - pan);
+    v.gainR = g * 2.0f * pan;
   }
 
   void noteOff(int note) {

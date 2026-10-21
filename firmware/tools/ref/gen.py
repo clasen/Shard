@@ -65,7 +65,8 @@ def fm(r, ratios=(1, 1, 1), **amounts):
 
 
 def preset(name, **changes):
-    """A factory preset with changes: f2_off/f3_off disable those filters, clear=[slots] empties mod slots, uni=n."""
+    """A factory preset with changes: f2_off/f3_off disable those filters, clear=[slots] empties mod slots, uni=n,
+    fx_off turns the effects chain off."""
     r = ET.parse(os.path.join(os.path.dirname(TEMPLATE), "..", name + ".obs", "Package.obs")).getroot()
     v = r.find("Voice")
     for k in ("F2", "F3"):
@@ -73,6 +74,7 @@ def preset(name, **changes):
     for slot in changes.get("clear", ()):
         c = v.find(f"Mod/C{slot:02d}"); c.set("Src", "None"); c.set("Dest", "None"); c.set("DstP", "---")
     if "uni" in changes: v.set("Uni", str(changes["uni"]))
+    if changes.get("fx_off"): r.find("FX").set("En", "0")
     return r
 
 
@@ -236,6 +238,32 @@ def tests():
                     ("zm15 FormM c70 v50", dict(Type="Formant-M", CutO=0.7, FVwl=0.5, Q=0.5)),
                     ("zm16 FormM c50 v50 Q0", dict(Type="Formant-M", CutO=0.5, FVwl=0.5, Q=0))):
         r = base(); osc(r, "Noise", "Nois", Type="White", Deci=0); F1(r, **kw); t[tag] = r
+    for tag, name, kw in (("zx01 FatWide core", "Fat Wide Pad", dict(fx_off=1, uni=1)), ("zx02 FatWide noFX", "Fat Wide Pad", dict(fx_off=1)),
+                          ("zx03 IronDrops noFX", "Iron Drops", dict(fx_off=1)), ("zx04 Dubstep core", "Dubstep Crush", dict(fx_off=1, uni=1)),
+                          ("zx05 Dubstep noFX", "Dubstep Crush", dict(fx_off=1)), ("zx06 PluckPad core", "Pluck or Pad", dict(fx_off=1, uni=1)),
+                          ("zx07 PluckPad noFX", "Pluck or Pad", dict(fx_off=1)), ("zx08 EP2 noFX", "Electric Piano 2", dict(fx_off=1)),
+                          ("zx09 7thHouse noFX", "7th House", dict(fx_off=1))):
+        t[tag] = preset(name, **kw)
+    for tag, pan in (("zp01 OscPan0", 0), ("zp02 OscPan100", 1), ("zp03 OscPan75", 0.75)):
+        r = base(); r.find("Voice/Osc/Osc0").set("Pan", str(pan)); t[tag] = r
+    for tag, uni, ste in (("zp04 Uni2 Ste100", 2, 1), ("zp05 Uni2 Ste50", 2, 0.5), ("zp06 Uni4 Ste100", 4, 1)):
+        r = base(); v = r.find("Voice"); v.set("Uni", str(uni)); v.set("UDtn", "0.3"); v.set("USte", str(ste)); t[tag] = r
+    def fmw(r, waves):
+        for op, w in zip(r.find("Voice/Osc/Osc0/FM/OP"), waves): op.set("Wave", w)
+    r = base(); fm(r, O3O=0.5); t["zk01 FM O3O50"] = r
+    r = base(); fm(r, O3O=0.25); t["zk02 FM O3O25"] = r
+    r = base(); fm(r, O3O=1); fmw(r, ("Sine", "Sine", "Saw Down")); t["zk03 FM SawDown out"] = r
+    r = base(); fm(r, O3O=1); fmw(r, ("Sine", "Sine", "Saw Up")); t["zk04 FM SawUp out"] = r
+    r = base(); fm(r, (1, 2, 1), O2O=0.5, O3O=0.5); t["zk05 FM O2O50 O3O50"] = r
+    r = base(); fm(r, O11=0.5, O1O=1); fmw(r, ("Saw Down", "Sine", "Sine")); t["zk06 FM SawDown fb50"] = r
+    r = base(); fm(r, O12=0.5, O2O=1); t["zk07 FM 1to2 50"] = r
+    def solo(name, keep):
+        r = preset(name, fx_off=1, uni=1)
+        for i in range(3):
+            if i != keep: r.find(f"Voice/Osc/Osc{i}").set("En", "Off")
+        return r
+    t["zk08 FatWide osc1"] = solo("Fat Wide Pad", 0)
+    t["zk09 EP2 osc1"] = solo("Electric Piano 2", 0)
     t["zd1 DeepBass noF23"] = preset("Deep Bass", f2_off=1, f3_off=1)
     t["zd2 DeepBass noLFO"] = preset("Deep Bass", clear=(3, 4, 5))
     t["zd3 DeepBass uni1"] = preset("Deep Bass", uni=1)

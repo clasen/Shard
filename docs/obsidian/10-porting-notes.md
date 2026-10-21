@@ -569,6 +569,12 @@ Hallazgos corregidos con esto:
   pre-delay), chorus/flanger (nuevo) y phaser ([07](07-effects.md)).
 - NanoSaw: la central a 0.88 y las laterales a 0.52 ([03](03-oscillators.md)). Formant-M/F
   implementado ([04](04-filters.md)).
+- Paneo del unísono con suma constante, como NS2 ([02](02-preset-format.md#unísono-b)).
+  Bi-Pulse de tres niveles, y `Osc N Phase` como destino de la matriz (desplaza la fase del
+  oscilador; con `Rand` cada nota arranca en otra fase) **[I]**.
+- Abierto: Fat Wide Pad (3 osciladores FM con feedback) sale ~13 dB más fuerte que NS2,
+  aunque un solo oscilador coincide; Africa Brass y otros presets con unísono 2 y `USte` alto
+  quedan 2–4 dB fuertes con la ley de suma constante, que el test directo confirma.
 
 Con eso coinciden con NS2 en nivel (±0.3 dB entre tests), afinación (0 cents) y bandas
 (±5 dB) los 17 patches de prueba de un módulo: saw, square, sine, tri, LP24 con y sin Q,
