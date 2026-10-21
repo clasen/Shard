@@ -1,34 +1,34 @@
-# Formato de preset `.obs`
+# The `.obs` preset format
 
-## Contenedor
+## Container
 
-- Un preset es una **carpeta** `Nombre.obs/` que contiene `Package.obs` **[P]**.
-- Si el preset usa samples, los `.wav` (o `.mp3`) viven en la misma carpeta **[P]**.
-- `Package.obs` es **XML 1.0 en texto plano**, indentado con tabs **[P]**.
-- La exportación de varios patches usa un `.zip` con estas carpetas adentro **[M][B]**.
+- A preset is a **folder** `Name.obs/` that contains `Package.obs` **[P]**.
+- If the preset uses samples, the `.wav` (or `.mp3`) files live in the same folder **[P]**.
+- `Package.obs` is **plain-text XML 1.0**, indented with tabs **[P]**.
+- Exporting several patches uses a `.zip` with these folders inside **[M][B]**.
 
-## Convenciones generales
+## General conventions
 
-- Casi todo elemento lleva `V="n"`: versión del bloque. Un lector tiene que aceptar
-  las versiones observadas (ver tabla) y tratar otras como desconocidas **[P]**.
-- Los números se escriben en decimal con hasta 6 cifras significativas. Puede
-  aparecer `INF` (por ejemplo, release infinito) **[P]**.
-- Los booleanos aparecen como `On`/`Off`, `OFF`/`FILTER`, `0`/`1` o como enum en
-  mayúsculas, según el bloque. Hay dos grafías para el mismo valor por versiones
-  distintas: `Sync="OFF"` y `Sync="Off"` **[P]**.
-- Los valores son de dos tipos **[P][B]**:
-  - **unidades reales**: segundos, Hz, semitonos, ganancia lineal;
-  - **normalizados 0..1**: cutoff, Q, drive, mezclas. La conversión a unidades reales
-    vive en el motor ([09-open-questions.md](09-open-questions.md)).
-- Los nombres de atributo son abreviaturas de los parámetros internos. La columna
-  "Interno" sale del RTTI (`cAudioParam<Nombre>`) **[B]**.
+- Almost every element carries `V="n"`: the block version. A reader has to accept the
+  observed versions (see the table) and treat others as unknown **[P]**.
+- Numbers are written in decimal with up to 6 significant digits. `INF` can appear (for
+  example, an infinite release) **[P]**.
+- Booleans appear as `On`/`Off`, `OFF`/`FILTER`, `0`/`1` or as an upper-case enum, depending
+  on the block. There are two spellings of the same value across versions: `Sync="OFF"` and
+  `Sync="Off"` **[P]**.
+- Values are of two kinds **[P][B]**:
+  - **real units**: seconds, Hz, semitones, linear gain;
+  - **normalized 0..1**: cutoff, Q, drive, mixes. The conversion to real units lives in the
+    engine ([09-open-questions.md](09-open-questions.md)).
+- Attribute names are abbreviations of the internal parameters. The "Internal" column comes
+  from the RTTI (`cAudioParam<Name>`) **[B]**.
 
-## Árbol completo
+## Full tree
 
 ```
 Root (FileVersion=1, V=3, Tags, Oct)
 ├── Voice (V=2)                      → Eden2::cSynthVoice
-│   ├── Osc (V=1, Type=Layer)        → Eden2::cOscTriple (capas por velocity)
+│   ├── Osc (V=1, Type=Layer)        → Eden2::cOscTriple (velocity layers)
 │   │   ├── Osc0 / Osc1 / Osc2       → Audio::cSynthOsc
 │   │   │   ├── Anlg                 → cOscTypeAnalogue
 │   │   │   ├── Wave → WT            → cOscTypeWaveTable / cWaveTable
@@ -36,57 +36,57 @@ Root (FileVersion=1, V=3, Tags, Oct)
 │   │   │   ├── FM → OP{O1,O2,O3}, Con{O11,O12,O13,O1O,O22,O23,O2O,O3O → Env}
 │   │   │   ├── NS                   → cOscTypeNanoSaw
 │   │   │   ├── Nois                 → cOscTypeNoise
-│   │   │   └── Samp → Zones → Zone* → oscilador Sample
+│   │   │   └── Samp → Zones → Zone* → Sample oscillator
 │   ├── Filt (V=1)                   → Eden2::cFilters
-│   │   └── F1 / F2 / F3             → Audio::cSynthFilter (F3 = filtro global [I])
+│   │   └── F1 / F2 / F3             → Audio::cSynthFilter (F3 = global filter [I])
 │   ├── Env (V=1)
 │   │   └── EnvA / EnvF / EnvP / Env4 / Env5   → Audio::cEnvelopeADSR
 │   ├── LFO (V=2)
 │   │   └── LFO1 … LFO5              → Audio::cLFOSimple
 │   └── Mod (V=2)
-│       ├── C00 … C23                → conexiones de modulación (24 slots)
-│       └── UI → C00 … C09 (Name)    → nombres de los 10 macros
+│       ├── C00 … C23                → modulation connections (24 slots)
+│       └── UI → C00 … C09 (Name)    → names of the 10 macros
 ├── FX (V=1, En, Ord)                → Eden2::cEden2Effects
 │   ├── MFX                          → cEffectMultiFXSimple
 │   ├── Dly                          → cEffectDelaySimple
 │   └── Rev                          → cEffectReverbAlgoSimple
-└── Autm (C01 … C11)                 → valores de los controles de performance [I]
+└── Autm (C01 … C11)                 → values of the performance controls [I]
 ```
 
-Las tres ramas de oscilador guardan **todos** los sub-bloques de tipo (`Anlg`, `Wave`,
-`PD`, `FM`, `NS`, `Nois`, `Samp`) aunque solo se use el que indica `Type` **[P]**.
-Así, al cambiar el tipo en la UI se conservan los ajustes del otro.
+The three oscillator branches store **all** the per-type sub-blocks (`Anlg`, `Wave`, `PD`,
+`FM`, `NS`, `Nois`, `Samp`) even though only the one named by `Type` is used **[P]**. That way,
+changing the type in the UI keeps the settings of the other.
 
 ## `Root`
 
-| Attr | Valores | Significado |
+| Attr | Values | Meaning |
 |---|---|---|
-| `FileVersion` | 1 | Versión del contenedor **[P]** |
-| `V` | 3 | Versión del bloque **[P]** |
-| `Tags` | entero 32 bits | Máscara de tags del browser **[P]**. Por correlación con los nombres de fábrica **[P][I]**: bit 0 lead (9 de 9), 1 pad, 2 bajo (39 de 41), 10 teclas, 19 batería (24 de 27), 8 efectos/FX; 20 y 29 están en casi todos; el resto describe timbre |
-| `Oct` | 2..7 | Octava del teclado (`cEden2::Octave`) **[P][B]** |
+| `FileVersion` | 1 | Container version **[P]** |
+| `V` | 3 | Block version **[P]** |
+| `Tags` | 32-bit integer | Browser tag mask **[P]**. By correlation with the factory names **[P][I]**: bit 0 lead (9 of 9), 1 pad, 2 bass (39 of 41), 10 keys, 19 drums (24 of 27), 8 effects/FX; 20 and 29 are set in almost all; the rest describe timbre |
+| `Oct` | 2..7 | Keyboard octave (`cEden2::Octave`) **[P][B]** |
 
 ## `Voice` → `cSynthVoice`
 
-| Attr | Interno | Valores | Notas |
+| Attr | Internal | Values | Notes |
 |---|---|---|---|
-| `Poly` | Polyphony | 0..16 | Límite de voces. **0 es mono** (legato con `GLeg`/`GTim`): en NS2, un acorde sobre Deep Bass (`Poly=0`) suena como una sola nota **[P]**. El port trata 0 y 1 como mono, con unísono |
-| `Uni` | Unison | 1..4 | Voces por nota **[P]** |
-| `UDtn` | UnisonDetune | 0..1 | Ver [Unísono](#unísono-b) **[B]** |
-| `USte` | UnisonStereo | 0..1 | Apertura estéreo del unísono, ver [Unísono](#unísono-b) **[B]** |
+| `Poly` | Polyphony | 0..16 | Voice limit. **0 is mono** (legato with `GLeg`/`GTim`): in NS2, a chord on Deep Bass (`Poly=0`) sounds as a single note **[P]**. The port treats 0 and 1 as mono, with unison |
+| `Uni` | Unison | 1..4 | Voices per note **[P]** |
+| `UDtn` | UnisonDetune | 0..1 | See [Unison](#unison-b) **[B]** |
+| `USte` | UnisonStereo | 0..1 | Stereo spread of the unison, see [Unison](#unison-b) **[B]** |
 | `GLeg` | GlideLegato | `On`/`Off` | **[P]** |
-| `GTim` | GlideTime | segundos, 0..0.47 observado | Curva UI `Power<400>` **[P][B]** |
+| `GTim` | GlideTime | seconds, 0..0.47 observed | UI curve `Power<400>` **[P][B]** |
 
-### Unísono **[B]**
+### Unison **[B]**
 
-`Eden2::cUnisonVoice` (note-on en `0x100559afc`, tablas en `0x100c2d230 + 24·N`). Para
-la voz `k` de `N`:
+`Eden2::cUnisonVoice` (note-on at `0x100559afc`, tables at `0x100c2d230 + 24·N`). For voice `k`
+of `N`:
 
 ```text
 d      = clamp(UDtn + mod, 0, 1)
-pitch += det[N][k] · d² · (1 + 0.2·N)            // semitonos
+pitch += det[N][k] · d² · (1 + 0.2·N)            // semitones
 pan    = clamp(pan_base + pan[N][k] · clamp(USte + mod, 0, 1), 0, 1)
-nivel *= scale[N]
+level *= scale[N]
 ```
 
 | N | `scale` | `det` | `pan` |
@@ -96,104 +96,103 @@ nivel *= scale[N]
 | 3 | 0.75 | −1, 0, 1 | −0.5, 0, 0.5 |
 | 4 | 0.7 | −1, −0.5, 0.5, 1 | −0.5, 0.25, −0.25, 0.5 |
 
-`scale` cuenta **al cuadrado**, como la amplitud que escala **[P]**: con 2 y 4 voces
-desafinadas (`UDtn` 0.3), NS2 suena al mismo nivel que con una (0.85² · √2 ≈ 1, 0.7² · √4 ≈ 1).
-Con `scale` lineal, el port salía 1.6 dB más fuerte con 2 voces.
+`scale` counts **squared**, like the amplitude it scales **[P]**: with 2 and 4 detuned voices
+(`UDtn` 0.3), NS2 plays at the same level as with one (0.85² · √2 ≈ 1, 0.7² · √4 ≈ 1). With a
+linear `scale`, the port came out 1.6 dB louder with 2 voices.
 
-**Ley de paneo [P]**: en NS2, `USte` no cambia el nivel de la suma mono (2 y 4 voces con
-`USte` 1 y 0.5 suenan como con 0), y un oscilador paneado a cualquier lado tampoco. O sea
-que la ley es de suma constante, `L = 2·(1 − pan)` y `R = 2·pan`, y no de balance. El port
-la usa para el unísono. Para el `Pan` de los filtros sigue con la ley de balance (unidad en
-el centro), porque In Lazy Curls, con F1 y F2 paneados a los extremos, solo coincide así.
+**Pan law [P]**: in NS2, `USte` does not change the level of the mono sum (2 and 4 voices with
+`USte` 1 and 0.5 sound as with 0), and neither does an oscillator panned to either side. So the
+law is constant-sum, `L = 2·(1 − pan)` and `R = 2·pan`, not a balance law. The port uses it for
+the unison. For the filters' `Pan` it keeps the balance law (unity at the centre), because In
+Lazy Curls, with F1 and F2 panned hard apart, only matches that way.
 
-Con `UDtn = 1` y 2 voces el detune es ±1.4 semitonos; con valores típicos (0.1–0.3) es de
-pocos cents. La ley de paneo **[?]**.
+With `UDtn = 1` and 2 voices the detune is ±1.4 semitones; with typical values (0.1–0.3) it is a
+few cents.
 
-## `Osc` → `cOscTriple` (capas y splits por velocity)
+## `Osc` → `cOscTriple` (velocity layers and splits)
 
-`Type="Layer"` en los 312 presets de fábrica; los presets de usuario usan también
-`Split 2` y `Split 3` (enum `VelSplitType`) **[P][B]**. Fórmulas en
-[03](03-oscillators.md#capas-y-splits-por-velocity-osc--cosctriple-b).
+`Type="Layer"` in all 312 factory presets; user presets also use `Split 2` and `Split 3` (enum
+`VelSplitType`) **[P][B]**. Formulas in
+[03](03-oscillators.md#velocity-layers-and-splits-osc--cosctriple-b).
 
-| Attr | Interno | Valor por defecto observado |
+| Attr | Internal | Default value observed |
 |---|---|---|
 | `LL1` / `LL2` | VelLayerLevel1/2 | 0 |
 | `S2L1` | VelSplit2Level1 | 0.5 |
 | `S3L1` / `S3L2` | VelSplit3Level1/2 | 0.333 / 0.667 |
 | `LX1` / `LX2` | VelXFade1/2 | 0 |
 
-## `Osc0..2` → `cSynthOsc` (parámetros comunes)
+## `Osc0..2` → `cSynthOsc` (common parameters)
 
-| Attr | Interno | Rango observado | Notas |
+| Attr | Internal | Observed range | Notes |
 |---|---|---|---|
 | `En` | Enable | `On`/`Off` | |
 | `Type` | Type | `Analog` `Wavetable` `PD` `FM` `NanoSaw` `Noise` `Sample` | |
-| `Trn` | Transpose | -36..36 | Semitonos enteros |
-| `Dtn` | FineTune | ±0.2 | Formato UI "cents", curva `SigmoidCentreZero<20>` **[B]**. Probablemente en semitonos (±0.2 = ±20 cents) **[I]** |
-| `KeyT` | KeyTrack | 0..1 | 1 = sigue el teclado; formato UI 0..200 % **[B]** |
-| `Lev` | Level | 0..2 | Ganancia lineal (UI en dB, curva `Power<200>`) **[P][B]** |
-| `Pan` | Pan | 0..1 | 0.5 = centro |
-| `FMix` | FilterMix | 0..1 | Reparto de la salida entre F1 y F2 **[I]** |
-| `Ring` | RingMod | 0..1 | Ring mod con el oscilador anterior **[I]** |
-| `Widt` | Width | 0..1 | Ancho estéreo |
-| `POff` | PhaseOffset | 0..1 | Fase inicial (UI en grados 0..360) **[B]** |
+| `Trn` | Transpose | -36..36 | Whole semitones |
+| `Dtn` | FineTune | ±0.2 | UI format "cents", curve `SigmoidCentreZero<20>` **[B]**. Probably in semitones (±0.2 = ±20 cents) **[I]** |
+| `KeyT` | KeyTrack | 0..1 | 1 = follows the keyboard; UI format 0..200 % **[B]** |
+| `Lev` | Level | 0..2 | Linear gain (UI in dB, curve `Power<200>`) **[P][B]** |
+| `Pan` | Pan | 0..1 | 0.5 = centre |
+| `FMix` | FilterMix | 0..1 | Split of the output between F1 and F2 **[I]** |
+| `Ring` | RingMod | 0..1 | Ring mod with the previous oscillator **[I]** |
+| `Widt` | Width | 0..1 | Stereo width |
+| `POff` | PhaseOffset | 0..1 | Start phase (UI in degrees 0..360) **[B]** |
 
-Los sub-bloques por tipo están en [03-oscillators.md](03-oscillators.md).
+The per-type sub-blocks are in [03-oscillators.md](03-oscillators.md).
 
-## `Filt` → `cFilters` y `F1..F3` → `cSynthFilter`
+## `Filt` → `cFilters` and `F1..F3` → `cSynthFilter`
 
-| Attr | Interno | Valores |
+| Attr | Internal | Values |
 |---|---|---|
 | `Rout` | FilterRouting | `SERIES` `PARALLEL` `STEREO` |
-| `O1BP` | Osc1Bypass | `OFF` `FILTER` (el manual también menciona saltear la envolvente de amplitud) |
+| `O1BP` | Osc1Bypass | `OFF` `FILTER` (the manual also mentions bypassing the amplitude envelope) |
 
-Para `F1..F3` ver [04-filters.md](04-filters.md).
+For `F1..F3` see [04-filters.md](04-filters.md).
 
 ## `Env/EnvA..Env5` → `cEnvelopeADSR`
 
-`EnvA` = amplitud, `EnvF` = filtro, `EnvP` = pitch, `Env4`, `Env5` libres **[P][B]**.
-Detalle en [05-envelopes-lfos.md](05-envelopes-lfos.md).
+`EnvA` = amplitude, `EnvF` = filter, `EnvP` = pitch, `Env4` and `Env5` free **[P][B]**. Details in
+[05-envelopes-lfos.md](05-envelopes-lfos.md).
 
 ## `LFO/LFO1..5` → `cLFOSimple`
 
-Detalle en [05-envelopes-lfos.md](05-envelopes-lfos.md).
+Details in [05-envelopes-lfos.md](05-envelopes-lfos.md).
 
 ## `Mod/C00..C23`
 
-24 slots de conexión **[P]**:
+24 connection slots **[P]**:
 
 ```xml
 <C00 V="3" Src="Filter Env" Dest="Filter 1+2" DstP="Cutoff" Sca="None" Dept="100" />
 ```
 
-| Attr | Significado |
+| Attr | Meaning |
 |---|---|
-| `Src` | Fuente |
-| `Dest` | Módulo destino |
-| `DstP` | Parámetro del destino (`---` si `Dest="None"`) |
-| `Sca` | Multiplicador: un macro que escala la conexión, o `None` |
-| `Dept` | Profundidad, -100..100 |
+| `Src` | Source |
+| `Dest` | Destination module |
+| `DstP` | Destination parameter (`---` if `Dest="None"`) |
+| `Sca` | Multiplier: a macro that scales the connection, or `None` |
+| `Dept` | Depth, -100..100 |
 
-Un slot vacío es `Src="None" Dest="None" DstP="---"`. Listas completas en
+An empty slot is `Src="None" Dest="None" DstP="---"`. Full lists in
 [06-modulation.md](06-modulation.md).
 
-`Mod/UI/C00..C09` guarda solo `Name`: los nombres de los 10 macros (8 knobs + Pad X +
-Pad Y) **[P][M]**.
+`Mod/UI/C00..C09` only stores `Name`: the names of the 10 macros (8 knobs + Pad X + Pad Y)
+**[P][M]**.
 
 ## `FX`
 
-| Attr | Interno | Valores |
+| Attr | Internal | Values |
 |---|---|---|
-| `En` | Enable | 0/1, bypass de toda la cadena |
-| `Ord` | EffectOrder | Entero con 3 bytes empaquetados |
+| `En` | Enable | 0/1, bypasses the whole chain |
+| `Ord` | EffectOrder | Integer with 3 packed bytes |
 
-`Ord` en hexadecimal **[P]**: `0x020100` (301 presets), `0x010200`, `0x020001`,
-`0x000102`, `0x000201`. Siempre es una permutación de {0, 1, 2}, un byte por
-efecto. Que byte *n* sea la posición del efecto *n* o el efecto en la posición *n*
-**[?]**. Tomando los hijos en el orden del XML (MFX=0, Dly=1, Rev=2), el valor por
-defecto `0x020100` da MFX → Dly → Rev en cualquiera de las dos lecturas.
+`Ord` in hexadecimal **[P]**: `0x020100` (301 presets), `0x010200`, `0x020001`, `0x000102`,
+`0x000201`. It is always a permutation of {0, 1, 2}, one byte per effect. Whether byte *n* is the
+position of effect *n* or the effect at position *n* is **[?]**. Taking the children in XML order
+(MFX=0, Dly=1, Rev=2), the default `0x020100` gives MFX → Dly → Rev under either reading.
 
-Detalle de cada efecto en [07-effects.md](07-effects.md).
+Details of each effect in [07-effects.md](07-effects.md).
 
 ## `Autm`
 
@@ -201,30 +200,29 @@ Detalle de cada efecto en [07-effects.md](07-effects.md).
 <Autm C01="0.5" C02="0" … C11="0" />
 ```
 
-Son 11 valores 0..1. `C01` vale 0.5 en los 312 presets **[P]**; puede ser el pitch wheel
-(centro 0.5) **[I]**. `C02..C11` son las posiciones de los 10 controles de performance en el
-mismo orden que sus nombres en el preset (`C00..C09 Name`): **Pad X, Pad Y, Knob 1..8**
-**[P]**. Al cargar el preset, los controles toman esos valores.
+These are 11 values in 0..1. `C01` is 0.5 in all 312 presets **[P]**; it may be the pitch wheel
+(centre 0.5) **[I]**. `C02..C11` are the positions of the 10 performance controls in the same
+order as their names in the preset (`C00..C09 Name`): **Pad X, Pad Y, Knob 1..8** **[P]**. When
+the preset loads, the controls take these values.
 
-Evidencia: los nombres de Rave Lead ("Cutoff", "Q", "Attack", "Release", "Bottom Cut"…)
-coinciden con sus slots Pad X → Cutoff, Pad Y → Q, Knob 1 → Attack. Con este orden, los
-renders del port de Rave Lead, Ef Em Crystal Keys, Deep Bass, BassGroove y Africa Brass
-pasan a coincidir con NS2. También se explican los tests: `Autm` C02 = 1 mueve el Pad X y no
-el Knob 1, y C10 = 1 mueve el Knob 7 y no un pad.
+Evidence: Rave Lead's control names ("Cutoff", "Q", "Attack", "Release", "Bottom Cut"…) match its
+slots Pad X → Cutoff, Pad Y → Q, Knob 1 → Attack. With this order, the port's renders of Rave
+Lead, Ef Em Crystal Keys, Deep Bass, BassGroove and Africa Brass match NS2. It also explains the
+tests: `Autm` C02 = 1 moves Pad X, not Knob 1, and C10 = 1 moves Knob 7, not a pad.
 
-## Versiones de bloque observadas
+## Observed block versions
 
-| Bloque | V |
+| Block | V |
 |---|---|
 | Root | 3 |
 | Voice, LFO, Mod, Env/EnvX | 2 |
 | Mod/Cnn | 3 |
 | Osc, OscN, Anlg, Wave, WT, PD, FM, OP/On, Con/Onn, NS, Nois, Samp, Zones, Filt, Fn, Env, LFOn, FX, MFX, Dly, Rev | 1 |
 
-Un lector robusto: valida `FileVersion=1`, usa defaults para atributos ausentes y
-avisa (sin fallar) cuando encuentra una versión de bloque no vista.
+A robust reader validates `FileVersion=1`, uses defaults for missing attributes, and warns
+(without failing) when it finds a block version it has not seen.
 
-## Ejemplo mínimo (fragmento real)
+## Minimal example (real excerpt)
 
 ```xml
 <?xml version="1.0"?>

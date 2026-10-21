@@ -1,114 +1,112 @@
-# Matriz de modulación
+# Modulation matrix
 
-## Modelo
+## Model
 
-Cada patch tiene **24 slots** (`Mod/C00..C23`) **[P]**. Un slot es:
+Each patch has **24 slots** (`Mod/C00..C23`) **[P]**. A slot is:
 
 ```
-salida = fuente × (multiplicador ? valor_macro : 1) × Dept/100   →   suma al parámetro DstP de Dest
+output = source × (multiplier ? macro_value : 1) × Dept/100   →   added to parameter DstP of Dest
 ```
 
-La forma multiplicativa del multiplicador sale del manual ("scales the connection's
-value") **[M]**. Cómo se suma al parámetro destino (en el dominio normalizado 0..1 o en
-unidades reales, con o sin recorte) **[?]**.
+The multiplicative form of the multiplier comes from the manual ("scales the connection's
+value") **[M]**. How it is added to the target parameter (in the normalized 0..1 domain or in
+real units, with or without clamping) is **[?]**.
 
-- `Dept` va de -100 a 100 **[P]**.
-- Varios slots pueden apuntar al mismo destino; se suman **[I]**.
-- Los slots vacíos (`None`) se pueden saltear. En los presets de fábrica el promedio
-  de slots usados es de unos 17 de 24 **[P]**, pero muchos son conexiones de macros
-  que no se mueven durante la nota.
+- `Dept` goes from -100 to 100 **[P]**.
+- Several slots can point at the same destination; they add up **[I]**.
+- Empty slots (`None`) can be skipped. In the factory presets the average number of used slots
+  is about 17 of 24 **[P]**, but many are macro connections that do not move during the note.
 
-## Fuentes (`Src`)
+## Sources (`Src`)
 
-Lista completa del binario **[B]**, con el uso en los presets **[P]**:
+Full list from the binary **[B]**, with use in the presets **[P]**:
 
-| Fuente | Rango **[I]** | Por voz | Uso |
+| Source | Range **[I]** | Per voice | Use |
 |---|---|---|---|
 | `None` | — | — | 2223 |
 | `Const One` | 1 | — | 0 |
-| `Rand 1`, `Rand 2` | valor aleatorio fijo por nota | sí | 57, 37 |
-| `Note` | nota MIDI normalizada | sí | 3 |
-| `Velocity` | 0..1 | sí | 29 |
-| `Release Vel` | 0..1 | sí | 0 |
-| `Gate` | 0/1 | sí | 0 |
-| `Amp Env`, `Filter Env`, `Pitch Env`, `Env 4`, `Env 5` | 0..1 (Bipolar ±1) | sí | 7, 342, 320, 78, 80 |
-| `LFO 1` … `LFO 5` | según `OutT` | sí | 341, 355, 332, 192, 252 |
+| `Rand 1`, `Rand 2` | random value fixed per note | yes | 57, 37 |
+| `Note` | normalized MIDI note | yes | 3 |
+| `Velocity` | 0..1 | yes | 29 |
+| `Release Vel` | 0..1 | yes | 0 |
+| `Gate` | 0/1 | yes | 0 |
+| `Amp Env`, `Filter Env`, `Pitch Env`, `Env 4`, `Env 5` | 0..1 (Bipolar ±1) | yes | 7, 342, 320, 78, 80 |
+| `LFO 1` … `LFO 5` | depends on `OutT` | yes | 341, 355, 332, 192, 252 |
 | `Pitch Wheel` | -1..1 | no | 304 |
-| `Pitch Wheel +` / `Pitch Wheel -` | mitad positiva/negativa | no | 0 |
+| `Pitch Wheel +` / `Pitch Wheel -` | positive/negative half | no | 0 |
 | `Knob 1` … `Knob 8` | 0..1 | no | 402, 397, 353, 306, 206, 154, 26, 23 |
 | `Pad X`, `Pad Y` | 0..1 | no | 330, 339 |
 
-El binario no tiene un string `Mod Wheel` ni `Aftertouch` cerca de esta tabla **[B]**.
-Lo más probable es que el mod wheel MIDI se mapee a un knob por la tabla de MIDI CC
-(`MIDI CONTROLLER MAP`) **[I]**.
+The binary has no `Mod Wheel` or `Aftertouch` string near this table **[B]**. Most likely the
+MIDI mod wheel is mapped to a knob through the MIDI CC table (`MIDI CONTROLLER MAP`) **[I]**.
 
-## Multiplicador (`Sca`)
+## Multiplier (`Sca`)
 
-`None` o una fuente de macro (`Knob 1..8`, `Pad X`, `Pad Y`) **[P]**. Se usa en el 0.3 %
-de las conexiones; es un recurso fino para "más vibrato cuanto más subo el knob".
+`None` or a macro source (`Knob 1..8`, `Pad X`, `Pad Y`) **[P]**. It is used in 0.3 % of the
+connections; it is a fine-grained tool for "more vibrato the further I turn the knob".
 
-## Destinos (`Dest`) y parámetros (`DstP`)
+## Destinations (`Dest`) and parameters (`DstP`)
 
-| Dest | DstP posibles **[P][B]** |
+| Dest | Possible DstP **[P][B]** |
 |---|---|
 | `Osc All` / `Osc 1` / `Osc 2` / `Osc 3` | `Pitch Coarse`, `Pitch Fine`, `Level`, `Pan`, `Phase`, `Filter Mix`, `Ring Mod`, `Width`, `An Pulse Width`, `An Sync Ratio`, `An Sync Hardness`, `WT Position`, `WT Detune`, `PD Phase Dist`, `FM OP1->OP2`, `FM OP1->OP3`, `FM OP2->OP3`, `FM OP1 Freq`, `FM OP1 FB`, `FM OP1 Out`, `FM OP2 Freq`, `FM OP2 FB`, `FM OP2 Out`, `FM OP3 Freq`, `FM OP3 Out`, `NanoSaw Detune`, `NanoSaw Mix`, `Noise Decimate`, `Noise Cutoff`, `Noise Q`, `Sample Start`, `Sample Loop Start`, `Sample Loop Len`, `Sample Zone Shift` |
 | `Filter 1` / `Filter 2` / `Filter 1+2` / `Global Filter` | `Cutoff`, `Cutoff Slow`, `Q`, `Drive`, `Output Gain`, `Output Pan`, `Formant Vowel`, `Comb/Lo-Fi Mix` |
 | `Amp` | `Gain` |
 | `Amp Env` / `Filter Env` / `Env 4` / `Env 5` | `Attack`, `Decay`, `Sustain`, `Release`, `Level`, `Delay`, `Retrigger` |
-| `Pitch Env` | lo anterior + `Attack Level`, `Release Level` |
+| `Pitch Env` | the above + `Attack Level`, `Release Level` |
 | `LFO 1..5` | `Rate`, `Level`, `Curve`, `Warp`, `Loop Pattern` |
 | `Voice` | `Unison Detune`, `Unison Stereo`, `Glide Time` |
 | `FX` | `Multi-FX Mix`, `Multi-FX Rate`, `Multi-FX Depth`, `Multi-FX Delay`, `Multi-FX FB`, `Delay Mix`, `Delay Time`, `Delay FB`, `Delay EQ`, `Reverb Mix`, `Reverb Time` |
 
-`Osc All` en la práctica se usa casi solo para `Pitch Coarse`: 818 de 829 usos **[P]**.
+In practice `Osc All` is used almost only for `Pitch Coarse`: 818 of 829 uses **[P]**.
 
-## Destinos más usados (para priorizar en un port) **[P]**
+## Most used destinations (to prioritize in a port) **[P]**
 
-| Conexión | Usos |
+| Connection | Uses |
 |---|---|
 | `Filter 1+2 / Cutoff` | 556 |
 | `Osc All / Pitch Coarse` | 818 |
-| `Amp Env / Attack` y `Release` | 250 + 242 |
+| `Amp Env / Attack` and `Release` | 250 + 242 |
 | `Amp / Gain` | 232 |
 | `Filter 1+2 / Q` | 170 |
 | `Filter 1+2 / Cutoff Slow` | 161 |
 | `Global Filter / Cutoff` | 137 |
 | `FX / Delay Mix`, `Reverb Mix` | 109 + 108 |
 
-## Escalas
+## Scales
 
-**Lo que está decompilado [B]:**
+**What is decompiled [B]:**
 
-- `Dept` se lee del XML como **entero** (lector de int, rango int32) en el campo `+0x20`
-  de la conexión (`0x1003ff868`). Los otros campos son `+0x10` Src, `+0x14` Dest, `+0x18`
-  DstP y `+0x1c` Sca.
-- Cada destino recibe la modulación ya sumada, como un vector de floats en el orden de
-  sus `DstP`, y la **suma al valor del parámetro en sus propias unidades**. En el filtro:
-  `m = 1` mueve el cutoff normalizado 1.0 (≈ 9.8 octavas), Q 1.0, Output Gain 2.0 y Shelf
-  Gain 24 dB. Es decir, **`m = 1` equivale al valor máximo del parámetro** (detalle en
-  [04-filters.md](04-filters.md#estructuras-internas-b)).
-- En el LFO, la modulación de Rate entra al cubo: `Rt + 60·m³` (ver
+- `Dept` is read from the XML as an **integer** (int reader, int32 range) into field `+0x20` of
+  the connection (`0x1003ff868`). The other fields are `+0x10` Src, `+0x14` Dest, `+0x18` DstP
+  and `+0x1c` Sca.
+- Each destination receives the modulation already summed, as a vector of floats in the order
+  of its `DstP`s, and **adds it to the parameter's value in that parameter's own units**. In the
+  filter: `m = 1` moves the normalized cutoff by 1.0 (≈ 9.8 octaves), Q by 1.0, Output Gain by
+  2.0 and Shelf Gain by 24 dB. That is, **`m = 1` equals the parameter's maximum value** (details
+  in [04-filters.md](04-filters.md#internal-structures-b)).
+- In the LFO, Rate modulation enters cubed: `Rt + 60·m³` (see
   [05-envelopes-lfos.md](05-envelopes-lfos.md)).
 
-**Lo que falta [?]:**
+**What is missing [?]:**
 
-- Cómo se convierte `Dept` en `m` dentro de la matriz. La hipótesis natural es
-  `m = Σ fuente × Dept/100 (× multiplicador)` **[I]**: con eso, `Filter Env → Cutoff`
-  con `Dept=100` barre todo el rango, que es lo que se escucha en los presets.
-- La escala de **Pitch Coarse**. La regla "m = 1 → máximo del parámetro" daría ±36
-  semitonos (el máximo de `Trn`), pero los presets apuntan a `Dept` = semitonos (`m = 1`
-  = 100 semitonos) **[P][I]**: 304 presets de fábrica doblan con `Pitch Wheel → Osc All
-  Pitch Coarse, Dept 2` (el ±2 típico), y las Pitch Env de los hats suben una octava con
-  `Dept 12`. El port usa 100. No se encontró la constante en el código del oscilador.
+- How `Dept` becomes `m` inside the matrix. The natural hypothesis is
+  `m = Σ source × Dept/100 (× multiplier)` **[I]**: with it, `Filter Env → Cutoff` with
+  `Dept=100` sweeps the whole range, which is what the presets sound like.
+- The scale of **Pitch Coarse**. The "m = 1 → parameter maximum" rule would give ±36 semitones
+  (the maximum of `Trn`), but the presets point to `Dept` = semitones (`m = 1` = 100 semitones)
+  **[P][I]**: 304 factory presets bend with `Pitch Wheel → Osc All Pitch Coarse, Dept 2` (the
+  usual ±2), and the hats' Pitch Envs rise an octave with `Dept 12`. The port uses 100. The
+  constant was not found in the oscillator code.
 
-**Test de render para cerrarlo (5 minutos en NS2):**
+**Render test to settle it (5 minutes in NS2):**
 
-1. Patch init: un oscilador Analog Sine, sin filtro, sin FX, nota A3.
-2. Conexión `Pitch Env → Osc All / Pitch Coarse`, `Dept = 100`. EnvP en Bipolar con
-   `SLv = 1`, attack largo (por ejemplo 2 s) y sustain 0.
-3. Grabar la salida y medir la frecuencia al principio: `semitonos = 12·log2(f0/220)`.
-4. Repetir con `Dept = 50` para confirmar que es lineal.
+1. Init patch: one Analog Sine oscillator, no filter, no FX, note A3.
+2. Connection `Pitch Env → Osc All / Pitch Coarse`, `Dept = 100`. EnvP in Bipolar with
+   `SLv = 1`, a long attack (2 s, for example) and sustain 0.
+3. Record the output and measure the frequency at the start: `semitones = 12·log2(f0/220)`.
+4. Repeat with `Dept = 50` to confirm it is linear.
 
-Patrón típico de fábrica que ayuda a calibrar **[P]**: los slots 0..3 suelen ser
-`Filter Env → Filter 1+2/Cutoff`, `Pitch Env → Osc All/Pitch Coarse`, y los knobs 1..4 a
-Cutoff, Q, Attack y Release (coincide con los nombres por defecto de los macros).
+A typical factory pattern that helps calibrate **[P]**: slots 0..3 are usually
+`Filter Env → Filter 1+2/Cutoff`, `Pitch Env → Osc All/Pitch Coarse`, and knobs 1..4 go to
+Cutoff, Q, Attack and Release (matching the default macro names).

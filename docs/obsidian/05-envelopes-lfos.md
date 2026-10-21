@@ -1,135 +1,132 @@
-# Envolventes y LFOs
+# Envelopes and LFOs
 
-## Envolventes (`cEnvelopeADSR`)
+## Envelopes (`cEnvelopeADSR`)
 
-Hay 5 por voz **[M][P]**:
+There are 5 per voice **[M][P]**:
 
-| Elemento | Nombre en la matriz | Conexión fija |
+| Element | Name in the matrix | Fixed connection |
 |---|---|---|
-| `EnvA` | Amp Env | Nivel y duración de la voz (VCA). La voz termina cuando esta envolvente llega a 0 |
+| `EnvA` | Amp Env | Level and duration of the voice (VCA). The voice ends when this envelope reaches 0 |
 | `EnvF` | Filter Env | — |
-| `EnvP` | Pitch Env | — (en 272 presets es `Bipolar`) |
+| `EnvP` | Pitch Env | — (`Bipolar` in 272 presets) |
 | `Env4` | Env 4 | — |
 | `Env5` | Env 5 | — |
 
-Las conexiones FM (`FM/Con/Oxy/Env`) usan el mismo formato **[P]**.
+The FM connections (`FM/Con/Oxy/Env`) use the same format **[P]**.
 
-### Tipos (`Type`)
+### Types (`Type`)
 
 - `ADSR`: delay → attack → decay → (breakpoint → decay2) → sustain → release **[M][B][I]**.
-- `AD`: sin sustain, típico de percusión **[M]**. En los presets de fábrica de batería
-  la amplitud AD tiene `S` 1 y `R` corto, o sea que el decay debe ir a 0 y no a `S`
-  **[P][I]**. El port lo toca así e ignora el note-off **[I]**.
-- `Bipolar`: la salida va de -1 a +1, típico para el pitch **[M]**. Usa niveles con signo en
-  los extremos (`SLv`, `RLv`). Modelo del port **[P][I]**: arranca en `SLv`, el attack la
-  lleva a 0, se queda en 0 (`D` y `S` no se usan) y el release va a `RLv`; todo por `Levl`.
-  - La configuración por defecto (`SLv` 0, `S` 1, `Levl` 1, con `Pitch Env → Pitch Coarse,
-    Dept 12`) está en 352 presets y tiene que ser neutra. Con "attack a 1 y sustain `S`" todos
-    sonaban una octava arriba.
-  - Los presets que la usan coinciden con este modelo: FM Electro Bass (`SLv` 1, attack de
-    40 ms, un golpe de pitch de +12 que cae a 0) y Reese Bass 2 (`SLv` −1, sube desde −12).
-  - Que `Levl` escale la salida: Hoover Vacuum (`SLv` 0.74, `Levl` 0.195, Dept 100) da una
-    caída de 14 semitonos; sin escalar serían 74.
-  - Falta confirmarlo en el binario (`0x10053163c`).
+- `AD`: no sustain, typical for percussion **[M]**. In the factory drum presets the AD amplitude
+  has `S` 1 and a short `R`, so the decay must go to 0 and not to `S` **[P][I]**. The port plays
+  it that way and ignores the note-off **[I]**.
+- `Bipolar`: the output goes from -1 to +1, typical for pitch **[M]**. It uses signed levels at
+  the ends (`SLv`, `RLv`). The port's model **[P][I]**: it starts at `SLv`, the attack takes it to
+  0, it stays at 0 (`D` and `S` are unused) and the release goes to `RLv`; all of it scaled by
+  `Levl`.
+  - The default setup (`SLv` 0, `S` 1, `Levl` 1, with `Pitch Env → Pitch Coarse, Dept 12`) is in
+    352 presets and has to be neutral. With "attack to 1 and sustain `S`" they all played an
+    octave up.
+  - The presets that use it agree with this model: FM Electro Bass (`SLv` 1, 40 ms attack, a +12
+    pitch hit that falls to 0) and Reese Bass 2 (`SLv` −1, rises from −12).
+  - `Levl` scales the output: Hoover Vacuum (`SLv` 0.74, `Levl` 0.195, Dept 100) gives a
+    14-semitone drop; unscaled it would be 74.
+  - Still to be confirmed in the binary (`0x10053163c`).
 
-### Parámetros
+### Parameters
 
-| Attr | Interno | Rango observado | Formato UI **[B]** | Notas |
+| Attr | Internal | Observed range | UI format **[B]** | Notes |
 |---|---|---|---|---|
-| `Dly` | Delay | 0..1 s | tiempo | Espera antes del ataque |
+| `Dly` | Delay | 0..1 s | time | Wait before the attack |
 | `A` | Attack | 0..10 s | `cFormatTimeAttack` | |
-| `D` | Decay | 0..20 s | tiempo | |
-| `Brk` | BreakPoint | 0..1 | % | Nivel donde termina `D` y empieza `D2` **[I]** |
-| `D2` | Decay2 | 0..2.5 s | tiempo | Segundo decay, de `Brk` a `S` **[I]** |
+| `D` | Decay | 0..20 s | time | |
+| `Brk` | BreakPoint | 0..1 | % | Level where `D` ends and `D2` starts **[I]** |
+| `D2` | Decay2 | 0..2.5 s | time | Second decay, from `Brk` to `S` **[I]** |
 | `S` | Sustain | 0..1 | % | |
-| `R` | Release | 0..8.5 s o `INF` | `cFormatTimeInf` | `INF` = la nota no se apaga sola |
-| `Levl` | Level | 0..1 | % | Nivel de salida (pico) |
-| `SLv` | BiAttackLevel | -1..1 | % con signo | Nivel inicial en modo Bipolar **[I]** |
-| `RLv` | BiReleaseLevel | -1..1 | % con signo | Nivel final del release en Bipolar **[I]** |
-| `AC` | AttackCurve | 1.03..33.3 | ver abajo | |
+| `R` | Release | 0..8.5 s or `INF` | `cFormatTimeInf` | `INF` = the note does not end on its own |
+| `Levl` | Level | 0..1 | % | Output level (peak) |
+| `SLv` | BiAttackLevel | -1..1 | signed % | Start level in Bipolar mode **[I]** |
+| `RLv` | BiReleaseLevel | -1..1 | signed % | End level of the release in Bipolar **[I]** |
+| `AC` | AttackCurve | 1.03..33.3 | see below | |
 | `DC` | DecayCurve | 1.03..33.3 | | |
-| `SC` | Decay2Curve **[I]** | casi siempre 1.22051 | | |
+| `SC` | Decay2Curve **[I]** | almost always 1.22051 | | |
 | `RC` | ReleaseCurve | 1.06..9.6 | | |
-| `VLev` | VelLevel | -1..1 | % con signo | Cuánto escala la velocity el nivel |
-| `VTim` | VelTime | -1..1 | % con signo | Cuánto escala la velocity los tiempos |
-| `KCtr` | KeyCentre | nota MIDI (12..115) | entero | Nota donde el key scaling es neutro |
-| `KLev` | KeyLevel | -1..1 | % con signo | Escalado del nivel por nota |
-| `KTim` | KeyTime | -1..1 | % con signo | Escalado de los tiempos por nota |
+| `VLev` | VelLevel | -1..1 | signed % | How much velocity scales the level |
+| `VTim` | VelTime | -1..1 | signed % | How much velocity scales the times |
+| `KCtr` | KeyCentre | MIDI note (12..115) | integer | Note where key scaling is neutral |
+| `KLev` | KeyLevel | -1..1 | signed % | Level scaling by note |
+| `KTim` | KeyTime | -1..1 | signed % | Time scaling by note |
 
-### Amplitud: la envolvente al cuadrado **[P]**
+### Amplitude: the envelope squared **[P]**
 
-La amplitud de la voz es `(envolvente · escalas de velocity y key · (Levl + Amp Gain))²`,
-medido contra renders de NS2:
-- Sustain 0.4 suena a −16 dB (0.4²), no a −8.
-- Un ataque de 0.2 s está a −42 dB a los 10 ms y a −11 dB a los 100 ms.
-- Con `VLev` 1, la velocity 40 suena a −20 dB del máximo.
-- `Levl` 0.5 baja 6 dB, así que también está dentro del cuadrado.
+The voice amplitude is `(envelope · velocity and key scaling · (Levl + Amp Gain))²`, measured
+against NS2 renders:
+- Sustain 0.4 sounds at −16 dB (0.4²), not −8.
+- A 0.2 s attack is at −42 dB after 10 ms and at −11 dB after 100 ms.
+- With `VLev` 1, velocity 40 sounds 20 dB below the maximum.
+- `Levl` 0.5 drops 6 dB, so it is inside the square too.
 
-Las otras envolventes son lineales: la de filtro ruteada al cutoff coincide con NS2 sin
-elevarla al cuadrado.
+The other envelopes are linear: the filter envelope routed to the cutoff matches NS2 without
+squaring.
 
-Con Attack 0, la nota arranca a nivel completo desde la primera muestra **[P]**: una cuadrada
-salta a su pico. El port calcula la amplitud por bloque y la interpola, así que en una voz
-libre el primer bloque arranca ya en su valor final, en lugar de subir desde 0 en 64
-muestras.
+With Attack 0, the note starts at full level from the first sample **[P]**: a square wave jumps
+to its peak. The port computes the amplitude per block and interpolates it, so on a free voice
+the first block already starts at its final value, instead of rising from 0 over 64 samples.
 
-### Velocity y key scaling **[B]**
+### Velocity and key scaling **[B]**
 
-Se calculan una vez en el note-on (`0x1005314d4`, con la nota `n` y la velocity
-`v ∈ 0..1`). `c` es `KCtr`:
+Computed once at note-on (`0x1005314d4`, with note `n` and velocity `v ∈ 0..1`). `c` is `KCtr`:
 
 ```text
-nivel_vel = VLev > 0 ? 1 + VLev·(v − 1) : 1 + VLev·v
-nivel_key = n > c ? (KLev > 0 ? 1 − (n − c)·KLev/(128 − c) : 1)
+vel_level = VLev > 0 ? 1 + VLev·(v − 1) : 1 + VLev·v
+key_level = n > c ? (KLev > 0 ? 1 − (n − c)·KLev/(128 − c) : 1)
                   : (KLev < 0 ? 1 + KLev·(1 − n/c)        : 1)
 t_vel     = VTim·(64/127 − v)
 t_key     = n > c ? (KTim > 0 ? (n − c)·KTim/c : 0)
                   : (KTim < 0 ? (n − c)·KTim/c : 0)
-salida   ×= nivel_vel · nivel_key
-tiempos  ×= 2^(3·(t_vel + t_key))
+output   ×= vel_level · key_level
+times    ×= 2^(3·(t_vel + t_key))
 ```
 
-- Con `VLev = 0.4`, una nota con `v = 0.3` sale a 0.72 del nivel, no a 0.3.
-- El factor de tiempos probablemente se aplica a todas las etapas **[I]**; la llamada es
-  a `exp2f` **[I]**.
+- With `VLev = 0.4`, a note with `v = 0.3` comes out at 0.72 of the level, not 0.3.
+- The time factor probably applies to every stage **[I]**; the call is to `exp2f` **[I]**.
 
-### Curvas (`AC`, `DC`, `SC`, `RC`)
+### Curves (`AC`, `DC`, `SC`, `RC`)
 
-El XML guarda directamente el **coeficiente `k`** de la curva, entre 1.03093 y 33.3333
-**[P]**. Lo que muestra la UI (`cEden2ADSR::cCurveShape`) es otra escala **[B]**.
+The XML stores the curve's **coefficient `k`** directly, between 1.03093 and 33.3333 **[P]**.
+What the UI shows (`cEden2ADSR::cCurveShape`) is another scale **[B]**.
 
-**Forma del segmento [B]**, decompilada de la función que dibuja la envolvente
-(`0x1002ae5e0`):
+**Segment shape [B]**, decompiled from the function that draws the envelope (`0x1002ae5e0`):
 
 ```text
-t ∈ [0, 1]              // fracción transcurrida del segmento
+t ∈ [0, 1]              // elapsed fraction of the segment
 y(t) = y0 + (y1 - y0) · t / (t + (k - 1)·(1 - t))
 ```
 
-| k | Forma |
+| k | Shape |
 |---|---|
-| 2 | Recta |
-| 1 < k < 2 | Convexa: sube rápido y se aplana (tipo carga RC). Default 1.22 |
-| k → 1.03 | Casi un escalón al principio del segmento |
-| k > 2 | Cóncava: arranca lento. A 33 casi todo el cambio queda al final |
+| 2 | Straight line |
+| 1 < k < 2 | Convex: rises fast and flattens (RC-charge style). Default 1.22 |
+| k → 1.03 | Almost a step at the start of the segment |
+| k > 2 | Concave: starts slowly. At 33 almost all of the change happens at the end |
 
-El DSP de audio usa **la misma fórmula** (`0x10053163c`, el evaluador de envolventes
-que también usan las conexiones FM) **[B]**.
+The audio DSP uses **the same formula** (`0x10053163c`, the envelope evaluator that the FM
+connections also use) **[B]**.
 
-**Tiempos en el DSP [B]**: internamente cada tiempo es un valor normalizado `x` en 0..1,
-con `T = Tmax · x³` (curva cúbica). La modulación de Attack/Decay/Release/Delay se suma en
-ese dominio `x` y se recorta a 0..1, y el segmento avanza `t += Δt / T` por muestra.
+**Times in the DSP [B]**: internally each time is a normalized value `x` in 0..1, with
+`T = Tmax · x³` (a cubic curve). Attack/Decay/Release/Delay modulation is added in that `x`
+domain and clamped to 0..1, and the segment advances `t += Δt / T` per sample.
 
-| Segmento | `Tmax` observado |
+| Segment | Observed `Tmax` |
 |---|---|
 | Attack | 10 s |
 | Delay, Decay | 20 s |
 
-Si `T` es casi 0 se usa un mínimo de 1 ms. El XML guarda segundos, así que al cargar
-`x = (T/Tmax)^(1/3)`. Esto explica los máximos de 10 s y 20 s de los presets.
+If `T` is almost 0, a minimum of 1 ms is used. The XML stores seconds, so on load
+`x = (T/Tmax)^(1/3)`. This explains the 10 s and 20 s maximums in the presets.
 
-**Conversión UI ↔ coeficiente [B]** (`0x1002aeff8` y su inversa `0x1002af08c`). Solo hace
-falta para mostrar o editar el valor como lo hace NS2:
+**UI ↔ coefficient conversion [B]** (`0x1002aeff8` and its inverse `0x1002af08c`). Only needed
+to show or edit the value the way NS2 does:
 
 ```text
 // UI u ∈ [0,1] → k
@@ -142,94 +139,94 @@ u' = clamp(0.5·b + 0.5, 0, 1)
 k  = 1 / (0.03 + 0.94·u')
 ```
 
-Valores de referencia: UI 0 → k 33.33, UI 0.25 → 6.78, UI 0.5 → 2 (recta),
-UI 0.707 → 1.22051 (el default), UI 0.75 → 1.173, UI 1 → 1.031.
+Reference values: UI 0 → k 33.33, UI 0.25 → 6.78, UI 0.5 → 2 (straight), UI 0.707 → 1.22051
+(the default), UI 0.75 → 1.173, UI 1 → 1.031.
 
-### Destinos de modulación de una envolvente **[P][B]**
+### Modulation destinations of an envelope **[P][B]**
 
-`Attack`, `Decay`, `Sustain`, `Release`, `Level`, `Delay`, `Retrigger`; el Pitch Env
-además tiene `Attack Level` y `Release Level`. `Retrigger` reinicia la envolvente
-cuando la fuente cruza un umbral **[I]**. El port la reinicia cuando la entrada pasa de ≤ 0 a
-\> 0 mientras la tecla está apretada; así Arping On (LFO 3 → Env 4 Retrigger) hace su ritmo
-en semicorcheas como NS2. Algunos presets la disparan con LFOs Random de amplitud 0.01, así
-que el umbral no puede ser mucho mayor que 0.
+`Attack`, `Decay`, `Sustain`, `Release`, `Level`, `Delay`, `Retrigger`; the Pitch Env also has
+`Attack Level` and `Release Level`. `Retrigger` restarts the envelope when the source crosses a
+threshold **[I]**. The port restarts it when the input goes from ≤ 0 to > 0 while the key is
+held; that way Arping On (LFO 3 → Env 4 Retrigger) plays its sixteenth-note rhythm as in NS2.
+Some presets trigger it with Random LFOs of amplitude 0.01, so the threshold cannot be much
+higher than 0.
 
 ---
 
 ## LFOs (`cLFOSimple`)
 
-5 por voz (`LFO1..LFO5`) **[M][P]**.
+5 per voice (`LFO1..LFO5`) **[M][P]**.
 
-### Formas (`Type`)
+### Shapes (`Type`)
 
-| Tipo | Descripción **[M]** |
+| Type | Description **[M]** |
 |---|---|
-| `Sine` | Seno |
-| `Square` | Cuadrada (`SqCv` la redondea **[I]**) |
-| `Triangle` | Triángulo |
-| `Saw Up` / `Saw Down` | Sierra |
-| `Saw Double` | Doble sierra; la segunda se puede correr para hacer swing |
-| `FM` | Onda FM de un operador, libre |
-| `FM Sync` | Igual a FM, pero se reinicia en cada ciclo del LFO |
-| `Random` | Sample & hold, con escalones o rampas |
-| `Random Loop` | Random con una secuencia fija que se repite |
+| `Sine` | Sine |
+| `Square` | Square (`SqCv` rounds it **[I]**) |
+| `Triangle` | Triangle |
+| `Saw Up` / `Saw Down` | Saw |
+| `Saw Double` | Double saw; the second one can be shifted for swing |
+| `FM` | Free-running one-operator FM wave |
+| `FM Sync` | Same as FM, but restarts on every LFO cycle |
+| `Random` | Sample & hold, with steps or ramps |
+| `Random Loop` | Random with a fixed sequence that repeats |
 
-Todas se modifican con `Crv` (curve), `Warp` y `Qtz` (quantize) **[M]**.
+All of them are shaped by `Crv` (curve), `Warp` and `Qtz` (quantize) **[M]**.
 
-### Parámetros
+### Parameters
 
-| Attr | Interno | Rango | Notas |
+| Attr | Internal | Range | Notes |
 |---|---|---|---|
-| `Rt` | Rate | 0..60 Hz | Curva UI `Power<300>` **[B]** |
-| `BRt` | RateUnits | `Hz` o denominador de nota: `1` `2` `4` `8` `12` `16` `32` | Con un valor distinto de `Hz`, el período es `RtBt / BRt` de compás **[I]** |
-| `RtBt` | RateBeats | 1..16 | Numerador en modo tempo |
-| `Sync` | Sync | `OFF` `KEY` `GLOBAL` | Reinicio por nota o alineado a la canción **[M]** |
-| `OutT` | OutputType | `BIPOLAR` `UNI HALF` `UNI FULL` | `y`, `max(y, 0)` (media onda) o `0.5·y + 0.5` **[B]** |
-| `Atk` | Attack | 0..25 s | Fade-in **lineal** de la amplitud desde el note on: `amp *= t/Atk` mientras `t < Atk` **[B]** |
-| `Ampl` | Ampl | 0..1 | Amplitud de salida |
-| `PhOf` | PhaseOffset | 0..1 | Fase inicial |
-| `Crv` | Curve | 0..1 | En el seno es un sesgo de fase (ver abajo) **[B]**; en las otras formas, el punto de quiebre **[I]** |
-| `SqCv` | SqCurve | 0..1 | Suavizado de la cuadrada **[I]** |
-| `Warp` | Warp | 0..1 | Curva racional sobre la salida, la misma de las envolventes con `k = 1/(0.03 + 0.94·Warp)`. 0.5 = neutro **[B]** |
-| `Qtz` | Quantize | 0..9 (0 = OFF) | `y = floor(y·n + 0.5) / n`; no se aplica a Random Loop **[B]** |
-| `RPtn` | RandPattern | 1..16 | Semilla o patrón del Random Loop |
-| `RLen` | RandLoopLen | 2..16 | Largo en pasos del Random Loop |
+| `Rt` | Rate | 0..60 Hz | UI curve `Power<300>` **[B]** |
+| `BRt` | RateUnits | `Hz` or a note denominator: `1` `2` `4` `8` `12` `16` `32` | With a value other than `Hz`, the period is `RtBt / BRt` of a bar **[I]** |
+| `RtBt` | RateBeats | 1..16 | Numerator in tempo mode |
+| `Sync` | Sync | `OFF` `KEY` `GLOBAL` | Restart per note or aligned to the song **[M]** |
+| `OutT` | OutputType | `BIPOLAR` `UNI HALF` `UNI FULL` | `y`, `max(y, 0)` (half wave) or `0.5·y + 0.5` **[B]** |
+| `Atk` | Attack | 0..25 s | **Linear** fade-in of the amplitude from note-on: `amp *= t/Atk` while `t < Atk` **[B]** |
+| `Ampl` | Ampl | 0..1 | Output amplitude |
+| `PhOf` | PhaseOffset | 0..1 | Start phase |
+| `Crv` | Curve | 0..1 | On the sine it is a phase skew (see below) **[B]**; on the other shapes, the breakpoint **[I]** |
+| `SqCv` | SqCurve | 0..1 | Square smoothing **[I]** |
+| `Warp` | Warp | 0..1 | Rational curve on the output, the same as the envelopes' with `k = 1/(0.03 + 0.94·Warp)`. 0.5 = neutral **[B]** |
+| `Qtz` | Quantize | 0..9 (0 = OFF) | `y = floor(y·n + 0.5) / n`; not applied to Random Loop **[B]** |
+| `RPtn` | RandPattern | 1..16 | Seed or pattern of the Random Loop |
+| `RLen` | RandLoopLen | 2..16 | Length in steps of the Random Loop |
 
-### Detalles decompilados (`0x100560ccc`) **[B]**
+### Decompiled details (`0x100560ccc`) **[B]**
 
-- **Rate con modulación**: `rate = clamp(Rt + 60·m³, 0, 60)`, con `m` la modulación de
-  Rate. El cubo da resolución fina cerca de 0.
-- **Seno**: tabla de 512 puntos con interpolación lineal (índice = `|fase|·512/2π`).
-- **Curve en el seno**: deforma la fase. Con `c` = Curve (+mod):
-  `φ' = φ < c ? 0.5·φ/c : 0.5 + 0.5·(φ - c)/(1 - c)` y la salida es `sin(2π·φ')`. Con c = 0.5
-  es el seno normal. Debajo de 0.02 y encima de 0.98 hay casos especiales (medio seno).
-- **Tabla de saltos por tipo**, en el orden del enum: 0 Sine, 1 Square, 2 Triangle,
-  3 Saw Up, 4 Saw Down (la misma rutina que Saw Up, negada), 5 Saw Double, 6 FM,
-  7 FM Sync (comparte rutina con FM), 8 Random, 9 Random Loop.
-- **Random**: LCG `x = (x · 31415821 + 1) & 0x3FFFFFFF`, salida `x·escala − 1` (bipolar).
-  Random Loop usa una tabla de patrones de 16 pasos (`RPtn` elige el patrón, `RLen` el largo).
-  Tempo: `RtBt 1`, `BRt 4` da un período de una negra **[P]**: 480 ms en el proyecto de NS2
-  de la Mac, que está a **125 BPM**. El port toca a 120 BPM porque no tiene transporte.
-  **Un período del LFO recorre el loop entero** **[P]**: cada paso dura `período / RLen`.
-  Arping On (8/16 de compás, `RLen` 8) reinicia su envolvente en semicorcheas en NS2. Los
-  valores del patrón siguen **[?]**: el port usa el LCG con una semilla por `RPtn`.
-- **Warp**: `y' = y / (y + (k−1)(1−y))` para `y ≥ 0`, simétrica para `y < 0`, con
+- **Rate with modulation**: `rate = clamp(Rt + 60·m³, 0, 60)`, with `m` the Rate modulation. The
+  cube gives fine resolution near 0.
+- **Sine**: a 512-point table with linear interpolation (index = `|phase|·512/2π`).
+- **Curve on the sine**: warps the phase. With `c` = Curve (+mod):
+  `φ' = φ < c ? 0.5·φ/c : 0.5 + 0.5·(φ - c)/(1 - c)` and the output is `sin(2π·φ')`. With c = 0.5
+  it is the plain sine. Below 0.02 and above 0.98 there are special cases (half sine).
+- **Jump table by type**, in enum order: 0 Sine, 1 Square, 2 Triangle, 3 Saw Up, 4 Saw Down (the
+  same routine as Saw Up, negated), 5 Saw Double, 6 FM, 7 FM Sync (shares the FM routine),
+  8 Random, 9 Random Loop.
+- **Random**: LCG `x = (x · 31415821 + 1) & 0x3FFFFFFF`, output `x·scale − 1` (bipolar). Random
+  Loop uses a table of 16-step patterns (`RPtn` picks the pattern, `RLen` the length).
+  Tempo: `RtBt 1`, `BRt 4` gives a period of one quarter note **[P]**: 480 ms in the NS2 project
+  on the Mac, which runs at **125 BPM**. The port plays at 120 BPM because it has no transport.
+  **One LFO period runs through the whole loop** **[P]**: each step lasts `period / RLen`.
+  Arping On (8/16 of a bar, `RLen` 8) restarts its envelope on sixteenth notes in NS2. The
+  pattern values are still **[?]**: the port uses the LCG with one seed per `RPtn`.
+- **Warp**: `y' = y / (y + (k−1)(1−y))` for `y ≥ 0`, symmetric for `y < 0`, with
   `k = 1/clamp(0.03 + 0.94·Warp, 0.03, 0.97)`.
-  El Warp solo se aplica a Sine, Triangle, Saw Up/Down y Saw Double; Square, FM y Random
-  lo saltean.
-- **Orden de proceso**: forma de onda → tipo de salida (`OutT`) → warp → quantize →
-  amplitud (`Ampl` + mod, recortada a 0..1) → fade-in de `Atk`.
+  Warp only applies to Sine, Triangle, Saw Up/Down and Saw Double; Square, FM and Random skip
+  it.
+- **Processing order**: waveform → output type (`OutT`) → warp → quantize → amplitude (`Ampl` +
+  mod, clamped to 0..1) → `Atk` fade-in.
 
-### ¿Por voz o global?
+### Per voice or global?
 
-El manual dice "each voice has 5 LFOs" **[M]**. El trigger del LFO (`0x100560bf0`) **[B]**:
+The manual says "each voice has 5 LFOs" **[M]**. The LFO trigger (`0x100560bf0`) **[B]**:
 
-- `Sync = GLOBAL`: la fase sale de la posición del transporte.
-- `Sync = KEY`: la fase arranca en `min(PhOf, 0.999)`.
-- `Sync = OFF`: usa la fase que recibe como argumento. Si es negativa (nota nueva), toma
-  una fase **aleatoria** con el mismo LCG de los LFOs, × 0.999. Cada nota arranca en un
-  punto distinto.
+- `Sync = GLOBAL`: the phase comes from the transport position.
+- `Sync = KEY`: the phase starts at `min(PhOf, 0.999)`.
+- `Sync = OFF`: it uses the phase it receives as an argument. If that is negative (a new note),
+  it takes a **random** phase from the same LCG as the LFOs, × 0.999. Each note starts at a
+  different point.
 
-### Destinos de modulación de un LFO **[P][B]**
+### Modulation destinations of an LFO **[P][B]**
 
 `Rate`, `Level`, `Curve`, `Warp`, `Loop Pattern`.

@@ -1,71 +1,71 @@
-# Filtros
+# Filters
 
-- `F1`, `F2`: los dos filtros de cada voz.
-- `F3`: el filtro global estéreo, aplicado a la suma de voces antes de los FX **[M][I]**.
-  Que F3 sea el global se deduce de que su `KeyT` vale 1 en los 312 presets (no tiene
-  nota a la que seguir) y de que el XML tiene 3 bloques para "2 por voz + 1 global".
+- `F1`, `F2`: the two filters of each voice.
+- `F3`: the stereo global filter, applied to the voice sum before the FX **[M][I]**. That F3 is
+  the global one follows from its `KeyT` being 1 in all 312 presets (it has no note to follow) and
+  from the XML having 3 blocks for "2 per voice + 1 global".
 
-Los tres usan la misma clase, `Audio::cSynthFilter` **[B]**: un filtro multimodo cuyo
-`Type` elige también waveshapers, comb, formant y lo-fi.
+All three use the same class, `Audio::cSynthFilter` **[B]**: a multimode filter whose `Type` also
+selects waveshapers, comb, formant and lo-fi.
 
-## Parámetros
+## Parameters
 
-| Attr | Interno | Rango | Formato UI **[B]** | Notas |
+| Attr | Internal | Range | UI format **[B]** | Notes |
 |---|---|---|---|---|
 | `En` | Enable | `On`/`Off` | | |
-| `Type` | Type | ver lista | | |
-| `CutO` | Cutoff | 0..1 | `cUIParamFormatCutoffFreq` | **`Hz = 20 · 900^CutO`** (20 Hz..18 kHz), ver abajo **[B]** |
-| `Q` | Q | 0..1 | `cUIParamFormatQ` | Resonancia normalizada; el mapeo depende de la familia, ver abajo **[B]** |
-| `Drv` | Drive | 0..1 | % | Saturador del ladder (`-A`) y ganancia de los waveshapers; los `-D` y EQ lo ignoran **[B]** |
-| `KeyT` | KeyTrack | 0..2 | 0..200 % | `Hz *= (f_nota / 130.8128)^KeyT`: neutro en C3 (MIDI 48) **[B]** |
-| `OGn` | OutputGain | 0..2 | dB, curva `Power<200>` | Ganancia lineal |
+| `Type` | Type | see list | | |
+| `CutO` | Cutoff | 0..1 | `cUIParamFormatCutoffFreq` | **`Hz = 20 · 900^CutO`** (20 Hz..18 kHz), see below **[B]** |
+| `Q` | Q | 0..1 | `cUIParamFormatQ` | Normalized resonance; the mapping depends on the family, see below **[B]** |
+| `Drv` | Drive | 0..1 | % | Saturator of the ladder (`-A`) and gain of the waveshapers; the `-D` and EQ types ignore it **[B]** |
+| `KeyT` | KeyTrack | 0..2 | 0..200 % | `Hz *= (f_note / 130.8128)^KeyT`: neutral at C3 (MIDI 48) **[B]** |
+| `OGn` | OutputGain | 0..2 | dB, curve `Power<200>` | Linear gain |
 | `Pan` | OutputPan | 0..1 | pan | |
-| `SGan` | ShelfGain | -24..24 | dB | Solo tipos EQ |
-| `FVwl` | FormantVowel | 0..1 | % | Solo Formant: morph de vocal |
-| `CMix` | CombMix | 0..1 | % | Mezcla para Comb y Lo-Fi ("Comb/Lo-Fi Mix") |
-| `WSGn` | WSGain | 0..1 | % | Solo waveshapers; en los renders de NS2 no cambia nada **[P]** |
+| `SGan` | ShelfGain | -24..24 | dB | EQ types only |
+| `FVwl` | FormantVowel | 0..1 | % | Formant only: vowel morph |
+| `CMix` | CombMix | 0..1 | % | Mix for Comb and Lo-Fi ("Comb/Lo-Fi Mix") |
+| `WSGn` | WSGain | 0..1 | % | Waveshapers only; in NS2 renders it changes nothing **[P]** |
 
-Los valores de los parámetros que no aplican al tipo elegido se guardan igual **[P]**.
+The values of parameters that do not apply to the chosen type are stored anyway **[P]**.
 
-## Cutoff: fórmula **[B]**
+## Cutoff: formula **[B]**
 
-Decompilado de la función de formato de la UI (`0x1000a2c94` y sus gemelas para Noise y
-Slate) y del update de coeficientes del filtro (`0x10055a290`):
+Decompiled from the UI format function (`0x1000a2c94` and its twins for Noise and Slate) and
+from the filter's coefficient update (`0x10055a290`):
 
 ```text
-K      = log2(900)                      // inicializador estático: 1.442695 × ln(900) = 9.81378
+K      = log2(900)                      // static initializer: 1.442695 × ln(900) = 9.81378
 hz     = 20 · 2^(K · (CutO + mod))      // = 20 · 900^(CutO + mod)
 if note >= 0 and KeyT > 1e-6:
     hz *= (noteFreq[note] / 130.8128)^KeyT     // 130.8128 Hz = C3, MIDI 48
 hz     = min(hz, 18000)
 ```
 
-- `CutO = 0.5` da 600 Hz, `0.25` da 109.5 Hz y `0.75` da 3286 Hz.
-- La modulación de cutoff se suma **en el dominio normalizado**, antes de la
-  exponencial. Por eso una profundidad dada mueve siempre la misma cantidad de octavas:
-  1.0 de modulación = log2(900) ≈ 9.8 octavas **[B]**.
-- Los demás parámetros del filtro se suman a su modulación y se recortan a su rango
-  (`fminnm`/`fmaxnm`) antes de usarse **[B]**.
-- Los parámetros pasan por un slew interno para no producir saltos (constante `30 ·`
-  sample-rate en el update) **[B]**. La constante exacta del slew **[?]**.
+- `CutO = 0.5` gives 600 Hz, `0.25` gives 109.5 Hz and `0.75` gives 3286 Hz.
+- Cutoff modulation is added **in the normalized domain**, before the exponential. That is why a
+  given depth always moves the same number of octaves: 1.0 of modulation = log2(900) ≈ 9.8
+  octaves **[B]**.
+- The other filter parameters are added to their modulation and clamped to their range
+  (`fminnm`/`fmaxnm`) before use **[B]**.
+- The parameters go through an internal slew to avoid jumps (constant `30 ·` sample rate in the
+  update) **[B]**. The exact slew constant is **[?]**.
 
-## Estructuras internas **[B]**
+## Internal structures **[B]**
 
-El patch del filtro (`cSynthFilter::cPatch`) guarda los floats en este orden, el mismo
-del XML. Índices en palabras de 32 bits:
+The filter patch (`cSynthFilter::cPatch`) stores the floats in this order, the same as the XML.
+Indices in 32-bit words:
 
 ```text
 [4] En  [5] Type  [6] CutO  [7] Q  [8] Drv  [9] SGan  [10] FVwl  [11] CMix
 [12] WSGn  [13] KeyT  [14] OGn  [15] Pan
 ```
 
-La modulación llega al filtro como un vector de 9 floats, en el orden de los `DstP`, y
-cada uno se suma al parámetro y se recorta a su rango:
+Modulation reaches the filter as a vector of 9 floats, in the order of the `DstP`s, and each is
+added to its parameter and clamped to its range:
 
-| # | DstP | Cómo se aplica |
+| # | DstP | How it applies |
 |---|---|---|
-| 0 | Cutoff | `CutO + m` (normalizado) |
-| 1 | Cutoff Slow | `CutO + slew(m)`, con un limitador de pendiente proporcional a 30·Δt |
+| 0 | Cutoff | `CutO + m` (normalized) |
+| 1 | Cutoff Slow | `CutO + slew(m)`, with a slope limiter proportional to 30·Δt |
 | 2 | Q | `Q + m` |
 | 3 | Drive | `clamp(Drv + m, 0, 1)` |
 | 4 | (Shelf Gain) | `clamp(SGan + 24·m, -24, 24)` dB |
@@ -74,139 +74,134 @@ cada uno se suma al parámetro y se recorta a su rango:
 | 7 | Output Gain | `clamp(OGn + 2·m, 0, 2)` |
 | 8 | Output Pan | `clamp(Pan + m, 0, 1)` |
 
-En todos los casos la modulación `m = 1` equivale al **valor máximo** del parámetro
-(1, 2 o 24). Ver [06-modulation.md](06-modulation.md#escalas).
+In every case, modulation `m = 1` equals the parameter's **maximum value** (1, 2 or 24). See
+[06-modulation.md](06-modulation.md#scales).
 
-## Q y resonancia **[B]**
+## Q and resonance **[B]**
 
-`q = clamp(Q + mod, 0, 1)`, suavizado. Después depende de la familia:
+`q = clamp(Q + mod, 0, 1)`, smoothed. After that it depends on the family:
 
-**Biquad (`-D`, en `0x1005399d8`)**:
+**Biquad (`-D`, at `0x1005399d8`)**:
 
 ```text
-q' = q · min(1, f / 40 Hz)        // menos resonancia debajo de 40 Hz
-Q_biquad = 0.5 + 5.5 · q'²        // LP/HP 12-D: de 0.5 a 6.0
+q' = q · min(1, f / 40 Hz)        // less resonance below 40 Hz
+Q_biquad = 0.5 + 5.5 · q'²        // LP/HP 12-D: from 0.5 to 6.0
 ```
 
-Los tipos del diseñador son 1 = LP 2 polos, 2 = HP 2 polos, 3 = LP 1 polo, 4 = HP 1 polo,
-8 = shelf y 12 = peak. Para EQ Peak, `Q = 0.25 + 7.75·q²` y la ganancia es `SGan` en dB.
-El port usa el peaking de RBJ. **EQ Shelf [B][P]** (diseñador `0x10053aa74`, llamado desde
-`0x10055a81c`):
+The designer's types are 1 = 2-pole LP, 2 = 2-pole HP, 3 = 1-pole LP, 4 = 1-pole HP, 8 = shelf
+and 12 = peak. For EQ Peak, `Q = 0.25 + 7.75·q²` and the gain is `SGan` in dB. The port uses
+RBJ's peaking filter. **EQ Shelf [B][P]** (designer `0x10053aa74`, called from `0x10055a81c`):
 
 ```text
 A    = 10^(SGan/40)
-S    = clamp(Q², 0.01, 1)                    // pendiente: con Q 0 la transición ocupa décadas
-low shelf RBJ con esa S, y los b multiplicados por 1/A
-     → graves a +SGan/2 dB y agudos a −SGan/2 dB: un EQ de inclinación ("tilt")
+S    = clamp(Q², 0.01, 1)                    // slope: with Q 0 the transition spans decades
+RBJ low shelf with that S, and the b's multiplied by 1/A
+     → lows at +SGan/2 dB and highs at −SGan/2 dB: a tilt EQ
 ```
 
-El 1/A lo calcula el caller con una exponencial rápida por bits:
+The caller computes the 1/A with a fast bit-level exponential:
 `bits = SGan·(−696658.5) + 1065292416 ≈ float(10^(−SGan/40))`.
 
-Esto está medido contra NS2 con un saw:
-- +12 dB con Q 0: de 0 dB a −6 dB.
-- −12 dB con Q 0: de 0 dB a +6 dB.
-- +24 dB con Q 1 y cutoff 0.5: de +12 dB a −12 dB, alrededor de 600 Hz.
+This was measured against NS2 with a saw:
+- +12 dB with Q 0: from 0 dB to −6 dB.
+- −12 dB with Q 0: from 0 dB to +6 dB.
+- +24 dB with Q 1 and cutoff 0.5: from +12 dB to −12 dB, around 600 Hz.
 
-Con este modelo, el port coincide en nivel y bandas. Antes se probó un high shelf con
-pendiente 1, que subía 24 dB todo el espectro.
+With this model, the port matches in level and bands.
 
-**Nivel del saturador del ladder [P]**: la voz alimenta los filtros a mitad de nivel. Para
-que el Drive sature como en NS2, el ladder recibe el doble y su salida se divide por 2. Con
-ese factor, los tests de Drive 0.3, 0.6 y 1.0 (oscilador a nivel 1 y 0.25) coinciden con NS2
-en nivel y en bandas. Sin él, con Drive 1 el port salía hasta 5.6 dB más fuerte y más
-brillante.
+**Level of the ladder's saturator [P]**: the voice feeds the filters at half level. For Drive
+to saturate as in NS2, the ladder gets twice the input and its output is halved. With that
+factor, the tests at Drive 0.3, 0.6 and 1.0 (oscillator at level 1 and 0.25) match NS2 in level
+and bands. Without it, at Drive 1 the port came out up to 5.6 dB louder and brighter.
 
-**F1 apagado (`En=Off`)** no filtra: en el port es `kFilterOff`, que solo aplica la ganancia.
-Antes se aproximaba con un LP 24-A abierto, que perdía hasta 13 dB a 16 kHz.
+**F1 disabled (`En=Off`)** does not filter: in the port it is `kFilterOff`, which only applies
+the gain.
 
-**Modelo analógico (`-A`, setup en `0x10054b098`)**: un **ladder de 4 polos multimodo**.
-La salida es una combinación lineal de la entrada y de las 4 etapas de 1 polo, como en el
-Oberheim Xpander:
+**Analog model (`-A`, setup at `0x10054b098`)**: a **4-pole multimode ladder**. The output is a
+linear combination of the input and the 4 one-pole stages, as in the Oberheim Xpander:
 
 ```text
 fn   = clamp(f / sr, 0, 0.25)
-d    = clamp(Drv + m, 0, 1)                  // Drive, suavizado en el estado del filtro (+0x10)
-sat0 = 4.9·d³ + 0.1                          // ganancia antes del saturador
-sat1 = (14.5·d³ + 1.5) / sat0                // ganancia después: el total es 14.5·d³ + 1.5
+d    = clamp(Drv + m, 0, 1)                  // Drive, smoothed in the filter state (+0x10)
+sat0 = 4.9·d³ + 0.1                          // gain before the saturator
+sat1 = (14.5·d³ + 1.5) / sat0                // gain after it: the total is 14.5·d³ + 1.5
 q' = q;  if f < 40 Hz: q' *= 0.5 + 0.0125·f
-q' *= compensación por modo (abajo)
-if q' ≥ 0.5: q' = 0.5 + 0.5·sqrt(2q' − 1)    // estira la mitad superior
+q' *= per-mode compensation (below)
+if q' ≥ 0.5: q' = 0.5 + 0.5·sqrt(2q' − 1)    // stretches the upper half
 w  = 2π·fn
 c  = fn·(0.33049 + 0.13697·w² − 3.6557·fn)
 G  = fn·(6.21533 + 0.86771·w²) + w·fn·(−2.72816 − 0.12692·w²)
 k  = q' · (3.0087 + 3·c)                     // Notch: k = q'
 ```
 
-`0x10055a290` le pasa el Drive suavizado al setup del ladder (`0x10054b098`) como cuarto
-float **[B]**. Hay además un límite `k ≤ 3/(sat0·sat1)` que se salta si el byte `+0x1c`
-del filtro vale 1 **[B]**. El constructor (`0x10055a1e8`) lo deja en 1, pero sin el límite el
-ladder autooscila con Drive y Q moderados (Drive 0.55 y Q 0.5 ya da ×7 en todo el
-espectro), así que Obsidian probablemente lo pone en 0. El port aplica el límite **[I]**.
+`0x10055a290` passes the smoothed Drive to the ladder setup (`0x10054b098`) as its fourth float
+**[B]**. There is also a limit `k ≤ 3/(sat0·sat1)` that is skipped when the filter's byte `+0x1c`
+is 1 **[B]**. The constructor (`0x10055a1e8`) sets it to 1, but without the limit the ladder
+self-oscillates with moderate Drive and Q (Drive 0.55 and Q 0.5 already give ×7 across the
+spectrum), so Obsidian probably sets it to 0. The port applies the limit **[I]**.
 
-Tabla de modos (`0x1009c3450`, 11 entradas de 32 bytes). Coeficientes de salida
-`[x, y1, y2, y3, y4]`:
+Mode table (`0x1009c3450`, 11 entries of 32 bytes). Output coefficients `[x, y1, y2, y3, y4]`:
 
-| Modo | Tipo | Ganancia | x | y1 | y2 | y3 | y4 | Compensación de q' |
+| Mode | Type | Gain | x | y1 | y2 | y3 | y4 | q' compensation |
 |---|---|---|---|---|---|---|---|---|
-| 1 | LP 12-A | 1 | 1 + 0.8k | 0 | 0.75 | 0 | 0 | `×(0.8 + 0.2d)`, y `÷ sat0` si > 1 |
-| 3 | LP 24-A | 1 | 1 + 0.8k | 0 | 0 | 0 | 0.75 | `÷ sat0` si > 1 |
+| 1 | LP 12-A | 1 | 1 + 0.8k | 0 | 0.75 | 0 | 0 | `×(0.8 + 0.2d)`, and `÷ sat0` if > 1 |
+| 3 | LP 24-A | 1 | 1 + 0.8k | 0 | 0 | 0 | 0.75 | `÷ sat0` if > 1 |
 | 5 | BP 6-A | 0.75 | 0 | 2 | −2 | 0 | 0 | `×(0.82 − 0.22d)` |
 | 6 | BP 12-A | 0.75 | 0 | 0 | 4 | −8 | 4 | `×(0.82 − 0.22d)` |
-| 7 | HP 12-A | 0.7 | 1 | −2 | 1 | 0 | 0 | `×0.8`, y `÷ sat0` si > 1 |
-| 8 | HP 24-A | 0.7 | 1 | −4 | 6 | −4 | 1 | `×(0.83 − 0.33d)`, y `÷ sat0` si > 1 |
+| 7 | HP 12-A | 0.7 | 1 | −2 | 1 | 0 | 0 | `×0.8`, and `÷ sat0` if > 1 |
+| 8 | HP 24-A | 0.7 | 1 | −4 | 6 | −4 | 1 | `×(0.83 − 0.33d)`, and `÷ sat0` if > 1 |
 | 9 | Notch 6-A | 0.7 | 1 | −2 | 2 | 0 | 0 | — |
 | 10 | Notch 12-A | 0.7 | 1 | −4 | 8 | −8 | 4 | — |
 
-- En los Notch no hay realimentación: `k = q'` escala la suma de las etapas (abajo).
-- Con Drive alto (`sat0 > 1`, o sea `d > 0.57`) la resonancia de LP y HP baja en `1/sat0`.
-- Los modos 2 y 4 son LP 12/24 sin el término `0.8k` y no los usa ningún tipo de Obsidian.
-- Los coeficientes de HP, BP y Notch son exactamente los binomios `(1 − L)^n`, que es lo
-  que uno espera de un ladder multimodo. El término `x·(1 + 0.8k)` de los LP es una
-  compensación de graves: devuelve parte de la entrada para que la resonancia no
-  "adelgace" el sonido **[I]**.
-- **Proceso por sample [B]** (`0x10054b3f8` reparte; `0x100556498` renderiza los modos
-  1..4, `0x1005565ac` los Notch y `0x1005566c8` el resto):
+- The Notch modes have no feedback: `k = q'` scales the sum of the stages (below).
+- With high Drive (`sat0 > 1`, that is `d > 0.57`) the LP and HP resonance drops by `1/sat0`.
+- Modes 2 and 4 are LP 12/24 without the `0.8k` term, and no Obsidian type uses them.
+- The HP, BP and Notch coefficients are exactly the binomials of `(1 − L)^n`, which is what one
+  expects from a multimode ladder. The `x·(1 + 0.8k)` term of the LP modes is a bass
+  compensation: it adds back part of the input so the resonance does not "thin out" the sound
+  **[I]**.
+- **Per-sample process [B]** (`0x10054b3f8` dispatches; `0x100556498` renders modes 1..4,
+  `0x1005565ac` the Notch modes and `0x1005566c8` the rest):
 
   ```text
-  u  = (LP: (1 + 0.8k)·x;  resto: x) − k·y4          // Notch: u = x
+  u  = (LP: (1 + 0.8k)·x;  others: x) − k·y4         // Notch: u = x
   v  = clamp(sat0·u, −1, 1)
-  s  = sat1·(v − v³/3)                                 // saturador cúbico
-  yi = (1 − G)·yi + G·(0.769·in + 0.231·in_prev)       // 4 etapas; in = s, y1, y2, y3
-  LP:    out = c2·y2 + c4·y4
-  Notch: out = cx·s + k·(c1·y1 + c2·y2 + c3·y3 + c4·y4)
-  resto: out = cx·s + c1·y1 + c2·y2 + c3·y3 + c4·y4
+  s  = sat1·(v − v³/3)                                 // cubic saturator
+  yi = (1 − G)·yi + G·(0.769·in + 0.231·in_prev)       // 4 stages; in = s, y1, y2, y3
+  LP:     out = c2·y2 + c4·y4
+  Notch:  out = cx·s + k·(c1·y1 + c2·y2 + c3·y3 + c4·y4)
+  others: out = cx·s + c1·y1 + c2·y2 + c3·y3 + c4·y4
   ```
 
-  `ci` son los coeficientes de la tabla de modos por la ganancia del modo. Con Drive 0 el
-  saturador es casi lineal hasta `|u| ≈ 10` y la ganancia de pequeña señal es 1.5. Con Drive
-  1, la ganancia es 16 (+24 dB) y la salida del saturador se recorta en `±2.13`. `G`, `k`
-  y `cx` se **interpolan linealmente muestra a muestra** entre el bloque anterior y el actual.
-- **Se procesan varias voces a la vez con SIMD (NEON)**: hay renders para 2 y para 4 voces
-  en paralelo, y tres familias según el modo (≤4, ≤10 y el resto). En un ESP32 no hace
-  falta: con una voz por vez alcanza.
+  `ci` are the mode table's coefficients times the mode's gain. With Drive 0 the saturator is
+  almost linear up to `|u| ≈ 10` and the small-signal gain is 1.5. With Drive 1, the gain is 16
+  (+24 dB) and the saturator's output clips at `±2.13`. `G`, `k` and `cx` are **linearly
+  interpolated sample by sample** between the previous block and the current one.
+- **Several voices are processed at once with SIMD (NEON)**: there are renders for 2 and for 4
+  voices in parallel, and three families by mode (≤4, ≤10 and the rest). An ESP32 does not need
+  this: one voice at a time is enough.
 
-## Tipos (`Type`)
+## Types (`Type`)
 
-Lista completa del binario, en el orden de la tabla de strings **[B]**, con el uso
-total en F1+F2+F3 **[P]**:
+The full list from the binary, in string-table order **[B]**, with the total use across
+F1+F2+F3 **[P]**:
 
-| Familia | Tipos | Uso |
+| Family | Types | Use |
 |---|---|---|
-| Pasabajos | `LP 6-D`, `LP 12-D`, `LP 12-A`, `LP 24-A` | 15, 34, 465, 102 |
-| Pasaaltos | `HP 6-D`, `HP 12-D`, `HP 12-A`, `HP 24-A` | 0, 2, 26, 24 |
-| Pasabanda | `BP 6-A`, `BP 12-A` | 5, 14 |
+| Low-pass | `LP 6-D`, `LP 12-D`, `LP 12-A`, `LP 24-A` | 15, 34, 465, 102 |
+| High-pass | `HP 6-D`, `HP 12-D`, `HP 12-A`, `HP 24-A` | 0, 2, 26, 24 |
+| Band-pass | `BP 6-A`, `BP 12-A` | 5, 14 |
 | Notch | `Notch 6-A`, `Notch 12-A` | 1, 12 |
 | EQ | `EQ Peak`, `EQ Shelf` | 66, 29 |
-| Formant | `Formant-M`, `Formant-F` (voz masculina/femenina) | 14, 11 |
+| Formant | `Formant-M`, `Formant-F` (male/female voice) | 14, 11 |
 | Comb | `Comb Pos`, `Comb Neg` | 5, 13 |
 | Waveshaper | `WS Tube`, `WS Soft`, `WS Hard`, `WS Enhance`, `WS Sine`, `WS Tri` | 19, 29, 23, 4, 9, 1 |
 | Lo-Fi | `Lo-Fi` | 13 |
 
-Código interno de cada tipo **[B]** (tabla `{u64 código, char* nombre}` en `0x100c2d4e0`,
-con 25 entradas). El byte alto es la familia y el bajo la variante:
+Internal code of each type **[B]** (table `{u64 code, char* name}` at `0x100c2d4e0`, with 25
+entries). The high byte is the family and the low byte the variant:
 
-| Código | Tipo | Código | Tipo |
+| Code | Type | Code | Type |
 |---|---|---|---|
 | `0x000` | LP 6-D | `0x400` | EQ Peak |
 | `0x001` | LP 12-D | `0x401` | EQ Shelf |
@@ -222,37 +217,36 @@ con 25 entradas). El byte alto es la familia y el bajo la variante:
 | `0x301` | Notch 12-A | `0x705` | WS Tri |
 | | | `0x706` | Lo-Fi |
 
-La función que calcula la respuesta del filtro (`0x10055b0d8`) reparte en dos
-diseñadores de coeficientes distintos **[B]**:
+The function that computes the filter's response (`0x10055b0d8`) dispatches to two different
+coefficient designers **[B]**:
 
-- `0x10053bd3c` para `LP 6-D`, `LP 12-D`, `HP 6-D`, `HP 12-D`, `EQ Peak` y `EQ Shelf`. Es la
-  familia "-D", la de un diseño digital clásico (biquad) **[I]**.
-- `0x10054b5fc` para los `-A`: LP 12-A, HP 12-A, HP 24-A, BP 6/12-A y Notch 6/12-A. Es el
-  modelo analógico. La rama de `LP 24-A` no se lee bien en el pseudocódigo **[?]**.
-- Formant (`0x500/0x501`) y Comb (`0x600/0x601`) tienen funciones propias
-  (`0x100549a90`, `0x1005419b8`).
+- `0x10053bd3c` for `LP 6-D`, `LP 12-D`, `HP 6-D`, `HP 12-D`, `EQ Peak` and `EQ Shelf`. This is
+  the "-D" family, a classic digital design (biquad) **[I]**.
+- `0x10054b5fc` for the `-A` types: LP 12-A, HP 12-A, HP 24-A, BP 6/12-A and Notch 6/12-A. This is
+  the analog model. The `LP 24-A` branch does not read clearly in the pseudocode **[?]**.
+- Formant (`0x500/0x501`) and Comb (`0x600/0x601`) have their own functions (`0x100549a90`,
+  `0x1005419b8`).
 
-Lo que dice el código sobre `-A`/`-D` confirma que son dos familias de implementación;
-qué topología usa cada una **[?]**.
+What the code says about `-A`/`-D` confirms that they are two implementation families; which
+topology each uses is **[?]**.
 
-Nomenclatura:
-- El número es la pendiente en dB/octava: 6 = 1 polo, 12 = 2, 24 = 4.
-- `-A` y `-D` probablemente son "Analog" (modelado no lineal, tipo ladder/OTA con
-  saturación) y "Digital" (biquad/SVF limpio) **[I]**. Todos los 6 dB de LP/HP son `-D`, y
-  los 24 dB solo existen en `-A`.
+Naming:
+- The number is the slope in dB/octave: 6 = 1 pole, 12 = 2, 24 = 4.
+- `-A` and `-D` probably stand for "Analog" (non-linear modelling, ladder/OTA style with
+  saturation) and "Digital" (clean biquad/SVF) **[I]**. All the 6 dB LP/HP types are `-D`, and the
+  24 dB types only exist as `-A`.
 
-## Formant, waveshapers y Lo-Fi **[B]**
+## Formant, waveshapers and Lo-Fi **[B]**
 
-**Formant-M / Formant-F** (respuesta en `0x100549a90`): 4 resonadores pasabanda en paralelo
-cuyas frecuencias salen de una tabla de vocales (`0x1009c312c`), interpolada según
-`FVwl`. La tabla es la de **Peterson & Barney (1952)**, con 10 vocales del inglés
-americano. Columnas: F0, F1, F2, F3 en Hz.
+**Formant-M / Formant-F** (response at `0x100549a90`): 4 parallel band-pass resonators whose
+frequencies come from a vowel table (`0x1009c312c`), interpolated by `FVwl`. The table is
+**Peterson & Barney (1952)**, with 10 American English vowels. Columns: F0, F1, F2, F3 in Hz.
 
-| # | Hombres (Formant-M) | # | Mujeres (Formant-F) |
+| # | Male (Formant-M) | # | Female (Formant-F) |
 |---|---|---|---|
 | 0 | 136, 266, 2293, 2937 (/i/) | 10 | 231, 310, 2783, 3312 (/i/) |
 | 1 | 135, 392, 1993, 2568 (/ɪ/) | 11 | 232, 441, 2474, 3063 (/ɪ/) |
-| 2 | 128, 526, 1854, 2481 (/ɛ/) | … | el resto de la tabla femenina sigue después |
+| 2 | 128, 526, 1854, 2481 (/ɛ/) | … | the rest of the female table follows |
 | 3 | 125, 664, 1727, 2420 (/æ/) | | |
 | 4 | 129, 631, 1192, 2377 (/ʌ/) | | |
 | 5 | 124, 718, 1090, 2442 (/ɑ/) | | |
@@ -261,131 +255,128 @@ americano. Columnas: F0, F1, F2, F3 en Hz.
 | 8 | 139, 307, 876, 2239 (/u/) | | |
 | 9 | 132, 489, 1360, 1709 (/ɝ/) | | |
 
-Los valores son los publicados, así que un port puede tomarlos directamente del paper.
+The values are the published ones, so a port can take them straight from the paper.
 
-**Medido contra NS2 [P]** (ruido blanco por el filtro, tests `zm01`–`zm16`):
-- Los cuatro resonadores están en **F0, F1, F2 y F3** de la vocal, interpolada linealmente
-  entre las 10 de la tabla con `FVwl` (0..1 → vocal 0..9).
-- **Las frecuencias escalan con el cutoff**: `f = f_tabla · Hz_cutoff / 800`. Con CutO 0.5
-  (600 Hz) caen a 0.75 veces la tabla, con 0.7 a ~2.9 veces, y con CutO 1 se apilan en el
-  techo de ~14.4 kHz.
-- Cada resonador es un pasabanda de 2 polos con `Q_bp = 0.94·4^Q` y ganancia de pico
-  `Q_bp^1.5` (F0 a 0.7 de eso). Con Q 0 la respuesta es una loma de +5 dB; con Q 0.5, picos
-  de +13 a +15 dB.
-- Como filtro global responde igual que en la voz.
+**Measured against NS2 [P]** (white noise through the filter, tests `zm01`–`zm16`):
+- The four resonators sit at the vowel's **F0, F1, F2 and F3**, linearly interpolated between
+  the 10 vowels of the table by `FVwl` (0..1 → vowel 0..9).
+- **The frequencies scale with the cutoff**: `f = f_table · Hz_cutoff / 800`. With CutO 0.5
+  (600 Hz) they land at 0.75 times the table, with 0.7 at ~2.9 times, and with CutO 1 they pile
+  up at the ~14.4 kHz ceiling.
+- Each resonator is a 2-pole band-pass with `Q_bp = 0.94·4^Q` and peak gain `Q_bp^1.5` (F0 at 0.7
+  of that). With Q 0 the response is a +5 dB hump; with Q 0.5, peaks of +13 to +15 dB.
+- As a global filter it responds the same as in the voice.
 
-Con este modelo (`syn::Formant`, 4 SVF en paralelo) los tests con CutO 0.5 quedan a ±0.4 dB
-de nivel; con CutO 0.2–0.3 el port sale 2–3 dB más fuerte, y con CutO 1 más. Abierto
-**[?]**: en Dirty Saws (Formant-M global con `OGn` 0.25 y LFO → Formant Vowel) NS2 atenúa
-~7 dB y el port ~16 dB.
+With this model (`syn::Formant`, 4 SVFs in parallel) the tests at CutO 0.5 are within ±0.4 dB in
+level; at CutO 0.2–0.3 the port comes out 2–3 dB louder, and more at CutO 1. Open **[?]**: in
+Dirty Saws (global Formant-M with `OGn` 0.25 and LFO → Formant Vowel) NS2 attenuates by ~7 dB
+and the port by ~16 dB.
 
-**WS Tube … WS Tri**: reutilizan el efecto **WaveShape** de NanoStudio (`0x1000fd398`)
-con la forma 1..6. Cada forma es una **tabla de 1025 floats** generada al arrancar
-(`0x1000fcc94`): se parte de una rampa lineal de −1 a 1, se aplica la curva de la forma
-(`0x1000fd848`, que usa `expf`, `sinf` y `asinf` con constantes propias), y después se
-normaliza por el pico y se le resta el valor central para quitar el DC. Curvas sobre la
-rampa `x ∈ [−1, 1]` **[B]**, salvo donde dice **[I]**:
+**WS Tube … WS Tri**: they reuse NanoStudio's **WaveShape** effect (`0x1000fd398`) with shape
+1..6. Each shape is a **table of 1025 floats** generated at startup (`0x1000fcc94`): it starts
+from a linear ramp from −1 to 1, applies the shape's curve (`0x1000fd848`, which uses `expf`,
+`sinf` and `asinf` with its own constants), and then normalizes by the peak and subtracts the
+centre value to remove DC. Curves over the ramp `x ∈ [−1, 1]` **[B]**, except where marked
+**[I]**:
 
-Las curvas, decompiladas de `0x1000fd848` (la tabla de saltos en `0x1006db3ea` da el
-orden 1 Tube, 2 Soft, 3 Hard, 4 Enhance, 5 Sine, 6 Tri) **[B]**. `knee(a, e, r², c)` es
-`c + sqrt(r² − (min(a, e) − e)²)`: un codo circular que une la recta con un techo plano.
+The curves, decompiled from `0x1000fd848` (the jump table at `0x1006db3ea` gives the order
+1 Tube, 2 Soft, 3 Hard, 4 Enhance, 5 Sine, 6 Tri) **[B]**. `knee(a, e, r², c)` is
+`c + sqrt(r² − (min(a, e) − e)²)`: a circular knee that joins the line to a flat top.
 
-| Forma | Curva sobre `x ∈ [−1, 1]` |
+| Shape | Curve over `x ∈ [−1, 1]` |
 |---|---|
-| WS Tube | `y = 0.5·(x + 1.41)² − 1`; si `y > 0.9`: `knee(y, 1.1413, 0.11655, 0.6587)`; si `y < −0.3`: `1.3891 − sqrt(5.7077 − (min(−y, 1.9891) − 1.9891)²)`. Asimétrica |
+| WS Tube | `y = 0.5·(x + 1.41)² − 1`; if `y > 0.9`: `knee(y, 1.1413, 0.11655, 0.6587)`; if `y < −0.3`: `1.3891 − sqrt(5.7077 − (min(−y, 1.9891) − 1.9891)²)`. Asymmetric |
 | WS Soft | `1 − 2/(e^(clamp(18.984·x, ±10)) + 1)` = `tanh(9.49·x)` |
-| WS Hard | `v = 15·x`; si `|v| ≤ 0.8`: `v`; si no, `sign·knee(|v|, 1.2826, 0.46594, 0.31741)` |
-| WS Enhance | si `|x| < 0.1`: `(10·|x|)²·x`. Después, para `y ≥ 0`: `v = 1.7065·y`, `knee(v, 1.7065, 2.912, −0.70648)` pasado 0.5; para `y < 0`: `v = 1.1413·y`, `−knee(|v|, 1.1413, 0.11655, 0.6587)` pasado 0.9 |
+| WS Hard | `v = 15·x`; if `|v| ≤ 0.8`: `v`; otherwise `sign·knee(|v|, 1.2826, 0.46594, 0.31741)` |
+| WS Enhance | if `|x| < 0.1`: `(10·|x|)²·x`. Then, for `y ≥ 0`: `v = 1.7065·y`, `knee(v, 1.7065, 2.912, −0.70648)` past 0.5; for `y < 0`: `v = 1.1413·y`, `−knee(|v|, 1.1413, 0.11655, 0.6587)` past 0.9 |
 | WS Sine | `sin(13.5·x)` |
 | WS Tri | `asin(sin(13.5·x))` |
 
-Cada tabla tiene 1025 puntos sobre la rampa (paso 1/512), se divide por su pico y se le resta
-el valor central (`0x1000fcc94`).
+Each table has 1025 points over the ramp (step 1/512), is divided by its peak and has its centre
+value subtracted (`0x1000fcc94`).
 
-**Ganancias** (`0x1000fd398`) **[B]**: `d = a + (1 − a)·Drive`, con `a = 0.15` para Tube
-y Enhance y `0.02` para el resto. La posición en la tabla es `512 + x·WSGn·1023·d`, y la
-salida se multiplica por `1 − 0.3·d` (×1.5 en Tube). Que el primer factor sea `WSGn` y que
-el índice esté centrado en 512 es **[I]**. El efecto `WaveShape` completo (`0x100438424`)
-además sobremuestrea ×4 u ×8 y mezcla seco/húmedo; dentro del filtro de Obsidian eso
-**[?]**.
+**Gains** (`0x1000fd398`) **[B]**: `d = a + (1 − a)·Drive`, with `a = 0.15` for Tube and Enhance
+and `0.02` for the rest. The table position is `512 + x·WSGn·1023·d`, and the output is
+multiplied by `1 − 0.3·d` (×1.5 for Tube). That the first factor is `WSGn` and that the index is
+centred on 512 is **[I]**. The full `WaveShape` effect (`0x100438424`) also oversamples ×4 or ×8
+and mixes dry/wet; whether that happens inside Obsidian's filter is **[?]**.
 
-**Modelo medido [P]** (27 tests contra NS2, en
+**Measured model [P]** (27 tests against NS2, in
 [`tools/ref/gen.py`](../../firmware/tools/ref/gen.py), `zw*`, `zu*`, `zq*`):
-- **`WSGn` no hace nada**: con 0.25, 0.5, 0.905 y 1, NS2 da renders idénticos.
-- **El Cutoff es la mezcla seco/procesado**: `y = (1 − c)·x + c·WS(x)`, con `c` el cutoff
-  normalizado más sus modulaciones (incluida la envolvente de filtro), sin keytrack. Con
-  CutO 0 sale la señal sin tocar, con 0.5 exactamente la mitad de cada una.
-- La ganancia de entrada es proporcional a `d`, ~4.5 veces la de la fórmula de arriba con
-  `WSGn` 0.5. La salida sigue `1 − 0.3·d` (×1.5 en Tube). `OGn` escala la salida.
-- **Como filtro global** (F3), la entrada es ~5 veces menor y la salida ~5 veces mayor: el
-  WS global es casi lineal y su ganancia crece con `d` (Soft con Drive 0.3 sube 17 dB).
-- Con esto los tests coinciden en nivel (±2.4 dB) y armónicos (±1.4 dB), salvo el folder
-  Sine (4.7 dB de diferencia en el espectro).
+- **`WSGn` does nothing**: with 0.25, 0.5, 0.905 and 1, NS2 gives identical renders.
+- **The cutoff is the dry/processed mix**: `y = (1 − c)·x + c·WS(x)`, with `c` the normalized
+  cutoff plus its modulations (filter envelope included), without keytracking. At CutO 0 the
+  signal comes out untouched, at 0.5 exactly half of each.
+- The input gain is proportional to `d`, ~4.5 times that of the formula above with `WSGn` 0.5.
+  The output follows `1 − 0.3·d` (×1.5 for Tube). `OGn` scales the output.
+- **As the global filter** (F3), the input is ~5 times lower and the output ~5 times higher: the
+  global waveshaper is almost linear and its gain grows with `d` (Soft at Drive 0.3 adds 17 dB).
+- With this the tests match in level (±2.4 dB) and harmonics (±1.4 dB), except the Sine folder
+  (4.7 dB off in the spectrum).
 
-**`Drive` en los demás tipos [B]**: el valor pasa por un limitador de pendiente y se guarda en el estado del filtro (`+0x10`, en `0x10055a290`). Lo usan el
-ladder, como saturador (ver arriba), y el Formant (`0x706` se lo pasa a `0x1003d5884`). Los
-biquad (`0x1005399d8`) y los EQ reciben 1 fijo. Las familias de render son 1 biquad
-(`0x10053b208`), 2 ladder (`0x10054b3f8`), 3 formant, 4 comb (`0x100541890`) y 5
-(`0x1003d58a4`), según `0x10055aca0`.
+**`Drive` in the other types [B]**: the value goes through a slope limiter and is stored in the
+filter state (`+0x10`, at `0x10055a290`). The ladder uses it as its saturator (see above), and so
+does the Formant (`0x706` passes it to `0x1003d5884`). The biquads (`0x1005399d8`) and the EQs get
+a fixed 1. The render families are 1 biquad (`0x10053b208`), 2 ladder (`0x10054b3f8`), 3 formant,
+4 comb (`0x100541890`) and 5 (`0x1003d58a4`), according to `0x10055aca0`.
 
-**Lo-Fi**: reutiliza el efecto **LoFi** de NanoStudio (`BitCrush`, `Decimate`, `Mix`);
-`CMix` es la mezcla.
+**Lo-Fi**: reuses NanoStudio's **LoFi** effect (`BitCrush`, `Decimate`, `Mix`); `CMix` is the
+mix.
 
-**Comb Pos / Comb Neg** **[B]**: setup en `0x10055aa90` (Pos) y `0x10055a874` (Neg), que
-llaman a `0x100541828`. El proceso por muestra es `0x100433730`. `0x1005419b8` solo
-dibuja la curva en la UI.
+**Comb Pos / Comb Neg** **[B]**: setup at `0x10055aa90` (Pos) and `0x10055a874` (Neg), which call
+`0x100541828`. The per-sample process is `0x100433730`. `0x1005419b8` only draws the curve in the
+UI.
 
 ```text
-f    = cutoff en Hz (misma fórmula y keytrack que los demás tipos, 20..18000)
-D    = sr / f                                // muestras, en 16.16; máx. 2047 (buffer de 2048)
+f    = cutoff in Hz (same formula and keytrack as the other types, 20..18000)
+D    = sr / f                                // samples, in 16.16; max 2047 (2048-sample buffer)
 q    = clamp(Q + mod, 0, 1)
-fb   = q / (q + 0.0618034·(1 − q))           // 0 si q < 1e-6; recortado a ±0.999
+fb   = q / (q + 0.0618034·(1 − q))           // 0 if q < 1e-6; clamped to ±0.999
 dry  = 1 − 0.3·CMix
 wet  = dry·CMix
 Neg: fb = −fb, wet = −wet
 
-por muestra:
-  tap = delay[D]                             // interpolación lineal
-  h   = hp·h + (tap − tap_prev)              // bloqueador de DC, hp = 1 − 2π·5/sr
+per sample:
+  tap = delay[D]                             // linear interpolation
+  h   = hp·h + (tap − tap_prev)              // DC blocker, hp = 1 − 2π·5/sr
   buf = in + fb·h
   out = dry·in + wet·h
 ```
 
-- La constante 1.0618034 (`c` en `0x100d11d08`) la fija un inicializador estático.
-- `D`, `dry`, `wet` y `fb` se interpolan linealmente a lo largo del bloque. Para el
-  retardo hace un crossfade entre la lectura con el `D` anterior y la nueva.
-- Con `Q = 0` es un peine solo feedforward: `0.7·in ∓ 0.7·in[n−D]` con `CMix = 1`.
+- The constant 1.0618034 (`c` at `0x100d11d08`) is set by a static initializer.
+- `D`, `dry`, `wet` and `fb` are linearly interpolated across the block. For the delay it
+  crossfades between the read with the previous `D` and the new one.
+- With `Q = 0` it is a feedforward-only comb: `0.7·in ∓ 0.7·in[n−D]` with `CMix = 1`.
 
-## Modulación propia
+## Own modulation
 
-Destinos de la matriz para un filtro **[P][B]**: `Cutoff`, `Cutoff Slow`, `Q`, `Drive`,
+Matrix destinations for a filter **[P][B]**: `Cutoff`, `Cutoff Slow`, `Q`, `Drive`,
 `Output Gain`, `Output Pan`, `Formant Vowel`, `Comb/Lo-Fi Mix`.
 
-`Cutoff Slow` es la misma modulación de cutoff pero suavizada (con un slew) **[I]**.
-Sirve para fuentes con saltos, como los knobs o el random.
+`Cutoff Slow` is the same cutoff modulation but smoothed (with a slew) **[I]**. It is meant for
+sources that jump, like the knobs or random.
 
-`Dest` puede ser `Filter 1`, `Filter 2`, `Filter 1+2` (los dos a la vez) o `Global Filter`.
+`Dest` can be `Filter 1`, `Filter 2`, `Filter 1+2` (both at once) or `Global Filter`.
 
-## Cutoff muy bajo y bloqueo de DC **[P]**
+## Very low cutoff and DC blocking **[P]**
 
-Con el LP casi cerrado (CutO ≤ 0.1), el port coincide con NS2 en los armónicos de régimen.
-Antes era más oscuro por la fase de la sierra ([03](03-oscillators.md)): el golpe del ataque
-pasa por el filtro. Queda una diferencia en ese golpe. La cadena de NS2 tiene un bloqueo de
-DC de **~5 Hz** (un pasa-altos de un polo): la sierra abierta de NS2 pasada offline por un
-LP de 4 polos a 39 Hz reproduce exactamente su render con CutO 0.1, y la del port solo
-coincide si se le agrega ese pasa-altos. No se sabe si está en la voz o en la salida, y el
-port no lo tiene: solo se nota en el ataque de filtros casi cerrados.
+With the LP almost closed (CutO ≤ 0.1), the port matches NS2 in the steady-state harmonics. The
+attack thump goes through the filter, and that thump depends on the saw's start phase
+([03](03-oscillators.md)). A difference remains in that thump. NS2's chain has a **~5 Hz** DC
+blocker (a one-pole high-pass): NS2's open saw run offline through a 4-pole LP at 39 Hz
+reproduces its CutO 0.1 render exactly, while the port's saw only matches if that high-pass is
+added. It is not known whether it sits in the voice or at the output, and the port does not have
+it: it only shows in the attack of almost-closed filters.
 
-## Ruteo
+## Routing
 
-Ver [01-architecture.md](01-architecture.md#ruteo-de-filtros-rout-mp). Uso: STEREO 121,
-PARALLEL 97, SERIES 94 **[P]**.
+See [01-architecture.md](01-architecture.md#filter-routing-rout-mp). Use: STEREO 121, PARALLEL 97,
+SERIES 94 **[P]**.
 
-## Para un port
+## For a port
 
-- Los modelos `LP 12-A` y `LP 24-A` solos cubren el 70 % de los usos de F1 (220/312).
-- Un SVF de Cytomic/ZDF da LP/HP/BP/Notch de 12 dB con un solo núcleo. Dos en cascada
-  dan los 24 dB. Para el sabor "-A" alcanza con un `tanh` (o una aproximación
-  polinómica) en la entrada y en la realimentación.
-- Los waveshapers son funciones sin memoria: baratos, pero con aliasing si no se hace
-  oversampling.
+- The `LP 12-A` and `LP 24-A` models alone cover 70 % of F1's uses (220/312).
+- A Cytomic/ZDF SVF gives 12 dB LP/HP/BP/Notch from a single core. Two in cascade give the 24 dB
+  types. For the "-A" flavour, a `tanh` (or a polynomial approximation) at the input and in the
+  feedback is enough.
+- The waveshapers are memoryless functions: cheap, but they alias without oversampling.

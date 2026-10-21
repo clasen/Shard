@@ -1,70 +1,67 @@
-# Obsidian (NanoStudio 2): especificación por ingeniería inversa
+# Obsidian (NanoStudio 2): a reverse-engineered specification
 
-Documentación del sintetizador Obsidian de NanoStudio 2, pensada como base para
-reimplementarlo en otra plataforma (web con AudioWorklet/WASM, ESP32-S3, desktop).
-Describe *qué* hace el motor y *cómo* están guardados sus datos; no contiene código
-ni assets de la app.
+Documentation of NanoStudio 2's Obsidian synthesizer, meant as the basis for reimplementing it
+on another platform (web with AudioWorklet/WASM, ESP32-S3, desktop). It describes *what* the
+engine does and *how* its data is stored; it contains no code or assets from the app.
 
-## Índice
+## Contents
 
-| Archivo | Contenido |
+| File | Content |
 |---|---|
-| [01-architecture.md](01-architecture.md) | Flujo de señal, voz, módulos y mapa de clases internas |
-| [02-preset-format.md](02-preset-format.md) | Formato `.obs` (XML) completo, atributo por atributo |
-| [03-oscillators.md](03-oscillators.md) | Los 7 tipos de oscilador y sus parámetros |
-| [04-filters.md](04-filters.md) | Filtros de voz, ruteo y filtro global |
-| [05-envelopes-lfos.md](05-envelopes-lfos.md) | 5 envolventes y 5 LFOs |
-| [06-modulation.md](06-modulation.md) | Matriz de modulación: fuentes, destinos, parámetros |
-| [07-effects.md](07-effects.md) | Multi-FX, Delay, Reverb y su orden |
-| [08-wavetable-format.md](08-wavetable-format.md) | Formato binario `.tbl` |
-| [09-open-questions.md](09-open-questions.md) | Lo que falta saber y cómo averiguarlo |
-| [10-porting-notes.md](10-porting-notes.md) | Notas para web y ESP32 |
+| [01-architecture.md](01-architecture.md) | Signal flow, voice, modules and internal class map |
+| [02-preset-format.md](02-preset-format.md) | The full `.obs` (XML) format, attribute by attribute |
+| [03-oscillators.md](03-oscillators.md) | The 7 oscillator types and their parameters |
+| [04-filters.md](04-filters.md) | Voice filters, routing and the global filter |
+| [05-envelopes-lfos.md](05-envelopes-lfos.md) | 5 envelopes and 5 LFOs |
+| [06-modulation.md](06-modulation.md) | Modulation matrix: sources, destinations, parameters |
+| [07-effects.md](07-effects.md) | Multi-FX, Delay, Reverb and their order |
+| [08-wavetable-format.md](08-wavetable-format.md) | The binary `.tbl` format |
+| [09-open-questions.md](09-open-questions.md) | What is still unknown and how to find out |
+| [10-porting-notes.md](10-porting-notes.md) | Notes for web and ESP32 |
 
-## Fuentes
+## Sources
 
-- **Presets de fábrica**: 312 archivos `Factory/Instruments/Obsidian/*.obs/Package.obs`
-  dentro de `NanoStudio 2.app/Wrapper/NanoStudio 2.app/`. El esquema y los rangos se
-  extrajeron recorriendo todos.
-- **Manual**: `Manual/Obsidian.html` (v2.1.2) dentro del bundle.
-- **Binario**: `NanoStudio 2` (Mach-O arm64, SHA-256 `310ed846…5a13`). Está stripped,
-  pero conserva los nombres RTTI de C++ y las tablas de strings de la UI, de donde
-  salen las clases, los nombres de parámetros, los formatos y las curvas de la UI.
-- **Wavetables**: `WaveTables/**/*.tbl`, analizadas byte a byte.
+- **Factory presets**: 312 files `Factory/Instruments/Obsidian/*.obs/Package.obs` inside
+  `NanoStudio 2.app/Wrapper/NanoStudio 2.app/`. The schema and the ranges were extracted by
+  walking all of them.
+- **Manual**: `Manual/Obsidian.html` (v2.1.2) inside the bundle.
+- **Binary**: `NanoStudio 2` (Mach-O arm64, SHA-256 `310ed846…5a13`). It is stripped, but it
+  keeps the C++ RTTI names and the UI's string tables, which give the classes, the parameter
+  names, the formats and the UI curves.
+- **Wavetables**: `WaveTables/**/*.tbl`, analysed byte by byte.
 
-## Niveles de confianza
+## Confidence levels
 
-Cada afirmación lleva una marca:
+Every claim carries a mark:
 
-- **[P]** observado en los presets (dato concreto, verificable).
-- **[M]** dicho por el manual.
-- **[B]** observado en el binario (RTTI, strings), sin ejecutar ni decompilar.
-- **[I]** inferencia razonable, no verificada.
-- **[?]** desconocido; ver [09-open-questions.md](09-open-questions.md).
+- **[P]** observed in the presets (a concrete, verifiable fact).
+- **[M]** stated in the manual.
+- **[B]** observed in the binary (RTTI, strings), without running or decompiling.
+- **[I]** a reasonable inference, not verified.
+- **[?]** unknown; see [09-open-questions.md](09-open-questions.md).
 
-## Estado
+## Status
 
-- Hecho: arquitectura, formato de preset completo, enums completos, mapa
-  atributo XML → parámetro interno, formato `.tbl` (estructura y muestras).
-- Decompilado: fórmula del cutoff y del keytrack, códigos internos de los tipos de
-  filtro, forma de las curvas de envolvente y conversión de la UI, detalles del LFO
-  (rate, curve, warp, random, tipos de salida, quantize).
-- También decompilado: Q y el ladder multimodo de los filtros `-A`, cómo suma la
-  modulación en el filtro, el pitch de los osciladores, Analog (wavetable con mipmaps),
-  NanoSaw (7 sierras DPW), PD (estilo CZ) y los modos de detune de la wavetable.
-- También: FM (punto fijo, ondas de banda limitada), Noise (decimación que sigue la
-  nota), reverb (Freeverb + plate de Dattorro) y Delay.
-- También: proceso por sample del ladder, envolventes del DSP (`T = Tmax·x³`), Formant
-  (Peterson & Barney), waveshapers, Multi-FX (tipos → motores) y qué algoritmo de reverb
-  usa cada sala.
-- Medido en hardware: costo por bloque en un ESP32-S3 real; ver
+- Done: architecture, the full preset format, all enums, the XML attribute → internal parameter
+  map, the `.tbl` format (structure and samples).
+- Decompiled: the cutoff and keytrack formula, the filter types' internal codes, the shape of
+  the envelope curves and the UI conversion, LFO details (rate, curve, warp, random, output
+  types, quantize).
+- Also decompiled: Q and the multimode ladder of the `-A` filters, how modulation is added in
+  the filter, oscillator pitch, Analog (wavetable with mipmaps), NanoSaw (7 DPW saws), PD
+  (CZ style) and the wavetable detune modes.
+- Also: FM (fixed point, band-limited waves), Noise (decimation that follows the note), reverb
+  (Freeverb + Dattorro plate) and Delay.
+- Also: the ladder's per-sample process, the DSP envelopes (`T = Tmax·x³`), Formant (Peterson &
+  Barney), waveshapers, Multi-FX (types → engines) and which reverb algorithm each room uses.
+- Measured on hardware: per-block cost on a real ESP32-S3; see
   [10-porting-notes.md](10-porting-notes.md).
-- Pendiente: escala de `Dept` en la matriz (hay un test de render en
-  [06](06-modulation.md#escalas)), curvas exactas de los waveshapers y rangos internos
-  del Multi-FX. Ver
-  [09-open-questions.md](09-open-questions.md).
+- Pending: the `Dept` scale in the matrix (there is a render test in
+  [06](06-modulation.md#scales)), the exact waveshaper curves and the Multi-FX's internal
+  ranges. See [09-open-questions.md](09-open-questions.md).
 
-## Nota legal
+## Legal note
 
-Leer el formato de los presets y reimplementar la arquitectura para uso propio es
-interoperabilidad. Los presets de fábrica, las wavetables y los samples son
-contenido de Blip Interactive: no redistribuirlos dentro de otro producto.
+Reading the preset format and reimplementing the architecture for your own use is
+interoperability. The factory presets, wavetables and samples are Blip Interactive's content:
+do not redistribute them inside another product.

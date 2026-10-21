@@ -14,7 +14,7 @@ This is a work in progress. It will be open source, or at least a full write-up 
 
 ## The specification
 
-The documentation lives in [`docs/obsidian`](docs/obsidian/README.md). It is written in Spanish for now.
+The documentation lives in [`docs/obsidian`](docs/obsidian/README.md).
 
 | Document | What it covers |
 |---|---|
