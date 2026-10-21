@@ -1,0 +1,8 @@
+# 16 MB layout with a raw "content" partition for content2bin.py images (samples, wavetables and
+# presets, read through esp_partition_mmap). Copy it to firmware/obsidian_esp32/partitions.csv.
+# Name,   Type, SubType,  Offset,   Size,     Flags
+nvs,      data, nvs,      0x9000,   0x5000,
+otadata,  data, ota,      0xe000,   0x2000,
+app0,     app,  ota_0,    0x10000,  0x200000,
+content,  data, 0x40,     0x210000, 0xDE0000,
+coredump, data, coredump, 0xFF0000, 0x10000,
