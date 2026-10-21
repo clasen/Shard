@@ -28,7 +28,48 @@ FILTER_TYPES = {"LP 24-A": "kFilterLP24A", "LP 12-D": "kFilterLP12D", "LP 12-A":
                 "Notch 12-A": "kFilterNotch12A",
                 "EQ Peak": "kFilterEQPeak", "EQ Shelf": "kFilterEQShelf", "WS Tube": "kFilterWSTube",
                 "WS Soft": "kFilterWSSoft", "WS Hard": "kFilterWSHard", "WS Enhance": "kFilterWSEnhance",
-                "WS Sine": "kFilterWSSine", "WS Tri": "kFilterWSTri"}
+                "WS Sine": "kFilterWSSine", "WS Tri": "kFilterWSTri", "Formant-M": "kFilterFormantM",
+                "Formant-F": "kFilterFormantF"}
+
+
+CHORUS_TYPES = {"Chorus 1": "kChorus1", "Chorus 2": "kChorus2", "Ensemble 1": "kEnsemble1", "Ensemble 2": "kEnsemble2",
+                "Flanger 1": "kFlanger1", "Flanger 2": "kFlanger2"}
+# Reverb types (07-effects.md): engine (room = Freeverb, else the Dattorro plate), and the pre-delay
+# (s) and its crossfade from the Algoverb preset of the same name.
+REVERB_TYPES = {"Small Room 1": ("small", 0, 0), "Small Room 2": ("small", 0.0421, 0.495),
+                "Large Room 1": ("large", 0, 0), "Large Room 2": ("large", 0.0421, 0.495),
+                "Dense Room 1": ("dense", 0, 0), "Dense Room 2": ("dense", 0.0421, 0.495),
+                "Plate 1": ("plate", 0, 0), "Plate 2": ("plate", 0.0928, 0.402), "Hall": ("plate", 0.35, 0.303)}
+# Engine feedback at Decy 0.1, 0.5 and 0.9, chosen so that the port's decay rate matches NS2 renders
+# (plate 81/27/5.9 dB/s, dense 168/57/17, small >400/61/18, large >400/81/35) [P].
+REVERB_DECAY = {"plate": (0.035, 0.55, 0.905), "dense": (0.0, 0.24, 0.708),
+                "small": (0.1, 0.76, 0.932), "large": (0.1, 0.69, 0.875)}
+# Wet level at Mix 1 at the same Decy points, fitted to the early wet level of NS2 renders [P].
+REVERB_GAIN = {"plate": (3.4, 2.26, 2.0), "dense": (0.49, 3.8, 3.0), "small": (19.5, 19.5, 22.6), "large": (13.5, 13.5, 12.7)}
+# High damping of the loop at HDmp 0.25 and 0.8 [P].
+REVERB_DAMP = {"plate": (0.45, 0.9), "dense": (0.45, 0.9), "small": (0.15, 0.55), "large": (0.15, 0.55)}
+
+
+def interp3(points, decy):
+    """Piecewise-linear through (0.1, 0.5, 0.9) -> points, flat outside."""
+    xs = (0.1, 0.5, 0.9)
+    if decy <= xs[0]: return points[0]
+    if decy >= xs[2]: return points[2]
+    i = 0 if decy < xs[1] else 1
+    return points[i] + (points[i + 1] - points[i]) * (decy - xs[i]) / (xs[i + 1] - xs[i])
+
+
+def reverb_fields(rev):
+    """The engine values of a Rev element: decay, damping, gain, the HCut/LCut corners and the pre-delay."""
+    kind, pre, premix = REVERB_TYPES[rev.get("Type")]
+    decy, hdmp = num(rev.get("Decy")), num(rev.get("HDmp"))
+    d0, d1 = REVERB_DAMP[kind]
+    damp = min(max(d0 + (d1 - d0) * (hdmp - 0.25) / 0.55, 0.0), 0.95)
+    hp = 20 + 12000 * num(rev.get("HCut")) ** 3       # HCut is a high-pass, LCut a low-pass (07-effects.md)
+    lp = 200 + 21000 * (1 - num(rev.get("LCut"))) ** 3
+    return (f"p.reverbDecay = {f(interp3(REVERB_DECAY[kind], decy))}; p.reverbRoom = {'true' if kind in ('small', 'large') else 'false'}; "
+            f"p.reverbDamp = {f(damp)}; p.reverbGain = {f(interp3(REVERB_GAIN[kind], decy))};\n"
+            f"p.reverbHpHz = {f(hp)}; p.reverbLpHz = {f(lp)}; p.reverbPre = {f(pre)}; p.reverbPreMix = {f(premix)};")
 
 
 def uses_drive(filter_type):
@@ -270,9 +311,11 @@ class Converter:
             self.env_element(conn.find("Env"), f"{q}.fm.env[{c}]", f"{where} {tag}")
 
     @staticmethod
-    def drive_fields(q, flt):
-        """The Drv assignment of a filter whose type uses it (NS2 ignores WSGn, 04-filters.md)."""
-        return f" {q}.drive = {f(num(flt.get('Drv')))};" if uses_drive(flt.get("Type")) else ""
+    def type_fields(q, flt):
+        """The Drv and FVwl assignments of a filter whose type uses them (NS2 ignores WSGn, 04-filters.md)."""
+        t = flt.get("Type")
+        return ((f" {q}.drive = {f(num(flt.get('Drv')))};" if uses_drive(t) else "")
+                + (f" {q}.vowel = {f(num(flt.get('FVwl')))};" if t.startswith("Formant") else ""))
 
     # -- Filters ----------------------------------------------------------------------------
     def filters(self):
@@ -288,7 +331,7 @@ class Converter:
                       f"p.resonance = {f(num(f1.get('Q')))}; p.keyTrack = {f(num(f1.get('KeyT')))};")
             self.emit(f"p.filterGain = {f(num(f1.get('OGn')))};"
                       + (f" p.shelfGain = {f(num(f1.get('SGan')))};" if t.startswith("EQ") else "")
-                      + self.drive_fields("p", f1))
+                      + self.type_fields("p", f1))
         rout = filt.get("Rout")
         self.emit(f"p.route = {ROUTES[rout]}; p.osc1Bypass = {'true' if filt.get('O1BP') == 'FILTER' else 'false'}; "
                   f"p.filterPan = {f(num(f1.get('Pan')))};")
@@ -298,7 +341,7 @@ class Converter:
                       f"p.f2.keyTrack = {f(num(f2.get('KeyT')))};")
             self.emit(f"p.f2.gain = {f(num(f2.get('OGn')))}; p.f2.shelfGain = {f(num(f2.get('SGan')))}; "
                       f"p.f2.pan = {f(num(f2.get('Pan')))};"
-                      + self.drive_fields("p.f2", f2))
+                      + self.type_fields("p.f2", f2))
         elif self.f2_split:
             self.emit(f"p.f2.pan = {f(num(f2.get('Pan')))};  // F2 off: its bus passes through")
             if f2.get("En") == "On":
@@ -316,7 +359,7 @@ class Converter:
                 self.emit(f"p.f3.enabled = true; p.f3.type = {FILTER_TYPES[t]}; p.f3.cutoff = {f(num(f3.get('CutO')))}; "
                           f"p.f3.q = {f(num(f3.get('Q')))};")
                 self.emit(f"p.f3.gain = {f(num(f3.get('OGn')))}; p.f3.shelfGain = {f(num(f3.get('SGan')))};"
-                          + self.drive_fields("p.f3", f3))
+                          + self.type_fields("p.f3", f3))
                 self.check_default("F3", f3, "Pan", "0.5")
             else:
                 self.unsupported("F3", f"global filter Type={t} not supported")
@@ -474,8 +517,10 @@ class Converter:
                 self.emit(f"p.phaser.enabled = true; p.phaser.rate = {f(num(mfx.get('Rat')))}; "
                           f"p.phaser.depth = {f(num(mfx.get('Dep')))}; p.phaser.feedback = {f(num(mfx.get('FB')))};")
                 self.emit(f"p.phaser.width = {f(num(mfx.get('Wid')))}; p.phaser.mix = {f(num(mfx.get('Mix')))};")
-            elif num(mfx.get("Mix")) > 0.0:
-                self.unsupported("MFX", f"{t} (Mix {mfx.get('Mix')}) not supported")
+            elif t in CHORUS_TYPES:
+                self.emit(f"p.chorus.enabled = true; p.chorus.type = {CHORUS_TYPES[t]}; p.chorus.rate = {f(num(mfx.get('Rat')))}; "
+                          f"p.chorus.depth = {f(num(mfx.get('Dep')))}; p.chorus.delay = {f(num(mfx.get('Dly')))};")
+                self.emit(f"p.chorus.feedback = {f(num(mfx.get('FB')))}; p.chorus.mix = {f(num(mfx.get('Mix')))};")
         if self.delay_on:
             kind, _, ratio = dly.get("Type").partition(" 1:")
             seconds = num(dly.get("DTim"))
@@ -487,10 +532,8 @@ class Converter:
             self.emit(f"p.delay.feedback = {f(num(dly.get('FB')))}; p.delay.eq = {f(num(dly.get('EQCt')))}; "
                       f"p.delay.mix = {f(num(dly.get('Mix')))};")
         mix = num(rev.get("Mix")) if on and rev.get("En") == "1" else 0.0
-        self.emit(f"p.reverbMix = {f(mix)}; p.reverbDecay = {f(num(rev.get('Decy')))};")
-        if mix > 0.0:
-            self.unsupported("Rev", f"Type={rev.get('Type')} played by the plate; LCut={rev.get('LCut')} "
-                                    f"HCut={rev.get('HCut')} HDmp={rev.get('HDmp')} not mapped")
+        self.emit(f"p.reverbMix = {f(mix)};")
+        self.emit(reverb_fields(rev))
         if on and fx.get("Ord") != str(0x020100):
             self.unsupported("FX", f"Ord={fx.get('Ord')} not supported (order is Multi-FX -> Reverb)")
 
@@ -504,8 +547,7 @@ class Converter:
         self.f2_on = self.f2_split and f2.get("En") == "On" and f2.get("Type") in FILTER_TYPES
         self.reverb_on = fx.get("En") == "1" and fx.find("Rev").get("En") == "1"
         self.delay_on = fx.get("En") == "1" and fx.find("Dly").get("En") == "1"
-        self.phaser_on = (fx.get("En") == "1" and fx.find("MFX").get("En") == "1"
-                          and fx.find("MFX").get("Type") in ("Phaser 1", "Phaser 2"))
+        self.phaser_on = fx.get("En") == "1" and fx.find("MFX").get("En") == "1"  # phaser or chorus
         self.osc_block()
         for n in range(3):
             self.osc(n)

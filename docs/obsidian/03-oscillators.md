@@ -315,6 +315,9 @@ ganancias: centro = k·(1 − m/2)
 ```
 
 - `k` es la normalización del método de antialiasing (inversa de `f/sr`, ver abajo).
+- **Nivel medido [P]** (tests `zn01`–`zn05`): con esas ganancias el port salía 1.1 dB más
+  fuerte con `Mix` 0 y 6.2 dB con `Mix` 1. En NS2 la sierra central suena a 0.88 y las seis
+  laterales a 0.52 de lo que da la fórmula; con esos factores los 5 tests quedan a ±1 dB.
 - **Antialiasing: DPW** (Differentiated Parabolic Wave). Cada sierra tiene fase entera
   de 32 bits, y el estado previo se inicializa como `(fase/2³¹)²`, la parábola que el
   método deriva **[B]**.

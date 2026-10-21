@@ -41,6 +41,25 @@ Flanger 2 6, Flanger 1 3 **[P]**.
 - El motor interno trabaja en punto fijo (fase de 16 bits) y tiene una versión
   especializada por modo. Los rangos de delay y rate de cada modo **[?]**.
 
+**Medido contra NS2 [P]** (tests `zf19`–`zf27`, `zf40`–`zf48`). En cada ventana de 20 ms se
+ajusta la salida como `a·seco + b·seco(t − d)`:
+- **Chorus 1** con `Mix` 1 suena seco 0.66 + húmedo 0.68, y con `Mix` 0.5 seco 0.82 + húmedo
+  0.33, o sea `seco = 1 − Mix/3` y `húmedo = 2/3·Mix`. Con `Dly` 0.5 el retardo barre
+  6.6–8.6 ms con un LFO de ~0.3 Hz (`Rat` 0.25); con `Dep` 1 el barrido es ~2.5 veces más
+  rápido, y con `Rat` 0.75 el LFO es de ~1.5 Hz. La suma mono se explica con una sola copia
+  retardada, así que L y R siguen el mismo LFO.
+- **Flanger 1** mezcla igual que el chorus; su retardo está en 2.2 ms con `Dly` 0.1 y en
+  5.2 ms con `Dly` 0.5, y `FB` realimenta el húmedo (una segunda copia en 2·d).
+- **Phaser 1/2** con `Mix` 1 suena como seco 0.8 + húmedo 0.8.
+- Chorus 2 y los Ensemble dan copias invertidas o varias a la vez: el ajuste no los
+  resuelve **[?]**.
+
+**En el port** (`syn::Chorus`): una línea modulada por canal con un LFO senoidal:
+`centro = 3 + 10·Dly` ms (flanger: `1.45 + 7.5·Dly`), `profundidad = ±3.4·Dep` ms (flanger
+±3), `rate = 0.12·e^(3.36·Rat)` Hz. Chorus 2 tiene el doble de rate y 1.5 veces la
+profundidad, y los Ensemble suman una segunda línea con rate y retardo ×0.707 **[I]**.
+`Wid` no se usa. Con eso los 18 tests quedan a ±1 dB de nivel.
+
 La versión completa (`cEffectMultiFX`) tiene parámetros separados por tipo
 (`ChorusRate`, `FlangerDelay`, `PhaserFeedback`…) y `BassBypass` **[B]**. Las variantes 1/2
 de la versión simple probablemente son presets fijos de esos parámetros internos **[I]**.
@@ -81,14 +100,22 @@ El Delay simple comparte el proceso del Delay completo (`cEffectDelay`, `0x1005a
 - **EQ de la realimentación**: `LowCut` y `HighCut` (en la simple, `EQCut`) entran **al
   cuadrado** como coeficiente del filtro.
 
-**En el port** (`syn::Delay`):
-- Dos líneas de hasta 6 s en PSRAM, después del Multi-FX y antes de la reverb.
-- `1:N` = la línea derecha N veces más larga que la izquierda **[I]**.
-- Pingpong entra solo por la línea izquierda y se realimenta cruzado.
-- `EQCt` es una inclinación: 0.5 no filtra, por debajo es un pasabajos de un polo y por
-  encima un pasaaltos, con el coeficiente al cuadrado **[I]**.
-- Seco `1 − 0.5·Mix` y húmedo `Mix`, como la reverb del port **[?]**.
-- Los tiempos a tempo se tocan a 120 BPM. `Delay Mix` es destino de la matriz.
+**Medido contra NS2 [P]** (tests `zf02`–`zf08`, `zf50`, con notas cortas):
+- **El seco no baja**: sigue en 1 con cualquier `Mix`. El primer eco sale a `≈1.1·Mix²`
+  (−12 dB con 0.5, 0 dB con 1).
+- `Delay Mix` desde la matriz se suma a ese nivel húmedo, no a `Mix`: con `Mix` 0 y +0.5
+  desde un knob, el eco sale a −6 dB.
+- `FB` 0.5 baja 6 dB por eco, así que el feedback es lineal.
+- **Cross y Pingpong 1:2** dan lo mismo en mono: la entrada va a la línea L (`DTim`) y cada
+  eco rebota a la otra línea, de `DTim/2`. Con 250 ms, los ecos caen en 250, 375, 625,
+  750 ms…
+- **`EQCt`** es un shelving suave por pasada: con 0.1 baja ~3 dB los agudos por encima de
+  ~400 Hz, y con 0.9 ~3 dB los graves por debajo de ~700 Hz.
+- 1/8 a tempo da ecos cada 240 ms, porque el proyecto de NS2 de la Mac está a 125 BPM.
+
+**En el port** (`syn::Delay`): ese modelo, con dos líneas de hasta 6 s en PSRAM después del
+Multi-FX y antes de la reverb. Los tiempos a tempo se tocan a 120 BPM. Los tests quedan a
+±1 dB por eco y por banda.
 - En los presets el uso es Cross 1:2 (56), Stereo (45) y Pingpong 1:2 (22); la mediana de
   `EQCt` es 0.5.
 
@@ -206,6 +233,27 @@ Y "Hall" es Plate con pre-delay largo (ver la tabla de presets de arriba).
 - `Decy` y `HDmp` llegan a los motores como tamaño/decay y damping.
 - `Wet` y `Widt` entran al cuadrado cuando vienen modulados; la salida estéreo es una
   mezcla mid/side según `Widt`.
+
+**Medido contra NS2 [P]** (tests `zf09`–`zf18`, `zf28`–`zf36`, `zf49`, con notas cortas):
+- **Mezcla**: el seco se queda en 1 hasta `Mix` 0.5 y cae a 0 en `Mix` 1
+  (`seco = min(1, 2·(1 − Mix))`); el húmedo crece lineal con `Mix`, igual si `Mix` viene de
+  la matriz.
+- **Caída** (dB/s con `Decy` 0.1 / 0.5 / 0.9): Plate, Plate 2 y Hall 81 / 27 / 5.9; Dense
+  Room 168 / 57 / 17; Small Room >400 / 61 / 18; Large Room >400 / 81 / 35. Las Rooms con
+  `Decy` 0.1 casi no suenan.
+- `HDmp` 0.8 baja la cola entre 7 y 14 dB por encima de 1 kHz (Plate) y hasta 34 dB a
+  8 kHz (Small Room).
+- `LCut` y `HCut` 0.8 dejan el húmedo 26 dB más bajo: confirma un pasabajos y un pasaaltos
+  con los cortes de arriba.
+- El Hall es la Plate con pre-delay; Plate 2 y Room 2 apenas difieren de sus versiones 1.
+
+**En el port**: Plate, Plate 2, Hall y Dense Room usan la plate de Dattorro, y Small y
+Large Room usan Freeverb (8 combs y 4 allpasses por canal, con los 4 difusores de la plate
+a la entrada; sin ellos, los primeros ecos salían 6 dB más fuertes que en NS2).
+`obs2preset.py` traduce `Decy` a la realimentación de cada motor y fija la ganancia húmeda por
+tipo (tablas `REVERB_DECAY` y `REVERB_GAIN` en tres puntos de `Decy`, ajustadas contra los
+renders), `HDmp` al damping, `HCut`/`LCut` a filtros de un polo y el pre-delay según la tabla
+de presets. Los tests quedan a ±2 dB de nivel húmedo y a ±3 dB/s de caída.
 
 **Para un port**: Freeverb y la plate de Dattorro son algoritmos públicos y
 documentados. Con los largos de arriba se reproducen las dos familias. En el ESP32

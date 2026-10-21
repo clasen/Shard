@@ -263,6 +263,22 @@ americano. Columnas: F0, F1, F2, F3 en Hz.
 
 Los valores son los publicados, así que un port puede tomarlos directamente del paper.
 
+**Medido contra NS2 [P]** (ruido blanco por el filtro, tests `zm01`–`zm16`):
+- Los cuatro resonadores están en **F0, F1, F2 y F3** de la vocal, interpolada linealmente
+  entre las 10 de la tabla con `FVwl` (0..1 → vocal 0..9).
+- **Las frecuencias escalan con el cutoff**: `f = f_tabla · Hz_cutoff / 800`. Con CutO 0.5
+  (600 Hz) caen a 0.75 veces la tabla, con 0.7 a ~2.9 veces, y con CutO 1 se apilan en el
+  techo de ~14.4 kHz.
+- Cada resonador es un pasabanda de 2 polos con `Q_bp = 0.94·4^Q` y ganancia de pico
+  `Q_bp^1.5` (F0 a 0.7 de eso). Con Q 0 la respuesta es una loma de +5 dB; con Q 0.5, picos
+  de +13 a +15 dB.
+- Como filtro global responde igual que en la voz.
+
+Con este modelo (`syn::Formant`, 4 SVF en paralelo) los tests con CutO 0.5 quedan a ±0.4 dB
+de nivel; con CutO 0.2–0.3 el port sale 2–3 dB más fuerte, y con CutO 1 más. Abierto
+**[?]**: en Dirty Saws (Formant-M global con `OGn` 0.25 y LFO → Formant Vowel) NS2 atenúa
+~7 dB y el port ~16 dB.
+
 **WS Tube … WS Tri**: reutilizan el efecto **WaveShape** de NanoStudio (`0x1000fd398`)
 con la forma 1..6. Cada forma es una **tabla de 1025 floats** generada al arrancar
 (`0x1000fcc94`): se parte de una rampa lineal de −1 a 1, se aplica la curva de la forma

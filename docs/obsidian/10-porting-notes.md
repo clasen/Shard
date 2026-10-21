@@ -564,6 +564,11 @@ Hallazgos corregidos con esto:
 - Una voz libre arranca con los filtros en cero: sin fade-in, el estado que quedaba de la
   nota anterior sonaba como un clic al empezar.
 - Abierto: la cola de la envolvente FM con `Levl` 0 ([03](03-oscillators.md)).
+- Efectos medidos y corregidos: delay (seco fijo, húmedo `Mix²`, Cross/Pingpong, EQ),
+  reverb (ley de mezcla, caída y nivel por tipo, Freeverb para las Rooms, HDmp, cortes,
+  pre-delay), chorus/flanger (nuevo) y phaser ([07](07-effects.md)).
+- NanoSaw: la central a 0.88 y las laterales a 0.52 ([03](03-oscillators.md)). Formant-M/F
+  implementado ([04](04-filters.md)).
 
 Con eso coinciden con NS2 en nivel (±0.3 dB entre tests), afinación (0 cents) y bandas
 (±5 dB) los 17 patches de prueba de un módulo: saw, square, sine, tri, LP24 con y sin Q,
@@ -573,6 +578,10 @@ velocity y Levl.
 Las herramientas están en [`firmware/tools/ref`](../../firmware/tools/ref) (`build.sh`
 compila, `rec.sh` graba y `gen.py` arma los patches de prueba). La secuencia vive en
 `seq.h`.
+
+Para los efectos hay una segunda secuencia de notas cortas separadas 5 s (`kFxSeq` en
+`seq.h`): `rec.sh <toma> fxseq` la toca en NS2 y `render <imagen> <preset> <salida> fx` en el
+port, así las colas de delay y reverb se miden sin solaparse ([07](07-effects.md)).
 
 `rank.py` (necesita numpy) renderiza con el port cada toma `<prefijo>NN <preset>.raw` y
 ordena los presets por distancia a NS2: ganancia global, diferencia media de la envolvente
@@ -584,10 +593,10 @@ los toques sincronizados por reloj en ranuras de 30 s.
 Estado de los 37 presets de fábrica grabados (después de los arreglos de arriba):
 - Coinciden (envolvente y espectro ≤ 3 dB, nivel ±2 dB): Deep Bass, Bottle Bass, FM Stoned
   Keys, Rave Lead, Bold as Brass, Africa Brass, Percussive Bass, Hardstyle Lead, Hang Drum,
-  Ef Em Crystal Keys, Hard Glider, Snare 4 y Analogue Kick.
-- Con forma correcta y nivel distinto: el port sale 2–8 dB más fuerte en Dirty Saws, Slow
-  Sweep Pad, Fat Wide Pad, Iron Drops, Ocean of Secrets, NanoSaw 80s y Electric Piano 2, y
-  4–9 dB más bajo en In Lazy Curls, Pluck or Pad, Dubstep Crush, 7th House, 1984 y Plunk.
+  Hard Glider, Snare 4, NanoSaw 80s, Analogue Kick y Classic Acid (salvo el espectro).
+- Con forma correcta y nivel distinto: el port sale 3–9 dB más fuerte en Fat Wide Pad,
+  Iron Drops, Ocean of Secrets, Electric Piano 2, Slow Sweep Pad y Magic Pitch, y 5–9 dB más
+  bajo en Pluck or Pad, Dubstep Crush, 7th House y Dirty Saws.
 - Con FX o modulaciones que el port no tiene: PsyDelay (Env 4 → Delay Time/FB), Arping On
   (el patrón del Random Loop), Dead Space y Liquid Resonance.
 - La diferencia "espectral" de algunos presets FM es el piso de ruido de NS2 (−85 a

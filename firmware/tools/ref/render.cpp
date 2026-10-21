@@ -1,4 +1,4 @@
-// render <content.bin> <preset name> <out.raw>: plays the reference sequence (seq.h) through the port's
+// render <content.bin> <preset name> <out.raw> [fx]: plays the reference sequence (seq.h; kFxSeq with "fx") through the port's
 // engine on the host and writes the mono pre-volume mix (renderVoices + multiFx + plate) as 48 kHz float32,
 // the same point cmpref compares against an NS2 recording. Build with build.sh.
 #include "synth.h"
@@ -30,7 +30,7 @@ static bool loadImage(const char* path, std::vector<uint8_t>& img) {
 }
 
 int main(int argc, char** argv) {
-  if (argc < 4) { fprintf(stderr, "usage: render <content.bin> <preset name> <out.raw>\n"); return 2; }
+  if (argc < 4) { fprintf(stderr, "usage: render <content.bin> <preset name> <out.raw> [fx]\n"); return 2; }
   gBank = new WaveBank();
   gBank->build();
   static std::vector<uint8_t> img;
@@ -45,18 +45,22 @@ int main(int argc, char** argv) {
   e->setPatch(p);
   std::vector<float> out;
   float L[kBlock], R[kBlock], wl[kBlock], wr[kBlock], rin[kBlock];
+  const bool fx = argc > 4 && !strcmp(argv[4], "fx");
+  const RefEvent* seq = fx ? kFxSeq : kRefSeq;
+  const size_t count = fx ? kFxSeqCount : kRefSeqCount;
   const int blocks = (int)(22.0f * kSampleRate / kBlock);
   for (int b = 0; b < blocks; b++) {
     const double t0 = b * kBlock / kSampleRate, t1 = (b + 1) * kBlock / kSampleRate;
-    for (const RefEvent& v : kRefSeq) {
+    for (size_t i = 0; i < count; i++) {
+      const RefEvent& v = seq[i];
       if (v.t >= t0 && v.t < t1) e->noteOn(v.note, v.vel);
       if (v.t + v.dur >= t0 && v.t + v.dur < t1) e->noteOff(v.note);
     }
     e->renderVoices(L, R);
     e->multiFx(L, R);
     for (int n = 0; n < kBlock; n++) rin[n] = (L[n] + R[n]) * 0.25f;  // as the audio task feeds the plate
-    const float wet = e->plate.ok ? e->reverbMix() : 0.0f, dry = 1.0f - 0.5f * wet;
-    if (wet > 0.0f) e->plate.process(rin, wl, wr, e->patch.reverbDecay, 0.3f);
+    const float wet = e->reverbReady() ? e->reverbMix() : 0.0f, dry = fminf(1.0f, 2.0f * (1.0f - wet));
+    if (wet > 0.0f) e->reverb(rin, wl, wr);
     else for (int n = 0; n < kBlock; n++) wl[n] = wr[n] = 0.0f;
     for (int n = 0; n < kBlock; n++) out.push_back(0.5f * ((L[n] + R[n]) * dry + (wl[n] + wr[n]) * wet));
   }

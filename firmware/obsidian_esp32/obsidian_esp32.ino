@@ -1,5 +1,5 @@
 // Obsidian-style synth on ESP32-S3 + PCM5102A over I2S, played over USB-MIDI.
-// Voices render on core 1; the plate reverb runs on core 0, one block behind.
+// Voices render on core 1; the reverb runs on core 0, one block behind.
 //
 // The board option "USB Mode" selects how MIDI comes in on the native USB port:
 //   USB-OTG (TinyUSB)      -> the board is a USB-MIDI device for a computer (Serial over the same port).
@@ -91,9 +91,8 @@ static void reverbTask(void*) {
   for (;;) {
     xSemaphoreTake(gRevStart, portMAX_DELAY);
     uint32_t t0 = esp_cpu_get_cycle_count();
-    const syn::Patch& p = gEngine->patch;
-    if (gEngine->plate.ok && gEngine->reverbMix() > 0.0f) {
-      gEngine->plate.process(gRevIn, gWetL, gWetR, p.reverbDecay, 0.3f);
+    if (gEngine->reverbReady() && gEngine->reverbMix() > 0.0f) {
+      gEngine->reverb(gRevIn, gWetL, gWetR);
     } else {
       memset(gWetL, 0, sizeof(gWetL));
       memset(gWetR, 0, sizeof(gWetR));
@@ -500,8 +499,8 @@ void setup() {
   buildPadLists();
   for (int i = 0; i < presetCount(); i++)
     if (!strcmp(presetName(i), kBootPreset)) { loadPreset(i); break; }
-  Serial.printf("wavetables built in %u ms, plate %s, free internal %u KB, free PSRAM %u KB\n",
-                (unsigned)(millis() - t0), gEngine->plate.ok ? "ok" : "FAILED",
+  Serial.printf("wavetables built in %u ms, reverb %s, free internal %u KB, free PSRAM %u KB\n",
+                (unsigned)(millis() - t0), gEngine->plate.ok && gEngine->room.ok && gEngine->reverbPre.buf ? "ok" : "FAILED",
                 (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024), (unsigned)(ESP.getFreePsram() / 1024));
 
   gI2s.setPins(kPinBck, kPinLck, kPinDin);

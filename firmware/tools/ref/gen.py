@@ -146,6 +146,7 @@ def tests():
     def f3(r, **kw):
         e = r.find("Voice/Filt/F3"); e.set("En", "On")
         for k, val in kw.items(): e.set(k, str(val))
+    f3_ = f3
     for tag, typ, drv, lev, ogn in (("zu01 F3 Soft d30 L25", "WS Soft", 0.3, 0.25, 1), ("zu02 F3 Soft d30 L06", "WS Soft", 0.3, 0.0625, 1),
                                     ("zu03 F3 Soft d0", "WS Soft", 0, 1, 1), ("zu04 F3 Soft d100", "WS Soft", 1, 1, 1),
                                     ("zu05 F3 Tube d0", "WS Tube", 0, 1, 1), ("zu06 F3 Tube d100", "WS Tube", 1, 1, 1),
@@ -162,6 +163,79 @@ def tests():
         r = preset(name); r.find("Voice/Filt/F3").set("WSGn", "0.5"); t[tag] = r
     t["zt02 AK noF3"] = preset("Analogue Kick", f3_off=1)
     t["zt04 CA noF3"] = preset("Classic Acid", f3_off=1)
+    # Effects: zf01..zf18 are for the short-note sequence (rec.sh <out> fxseq, render ... fx).
+    def unit(r, tag, **kw):
+        e = next(r.iter(tag)); e.set("En", "1")
+        for k, val in kw.items(): e.set(k, str(val))
+    dly = dict(Type="Stereo", DTim=0.25, TNum=1, TDen="sec", EQCt=0.5, FB=0.5, Mix=0.5)
+    for tag, kw in (("zf01 Dry", None), ("zf02 Dly Stereo", {}), ("zf03 Dly Cross12", dict(Type="Cross 1:2")),
+                    ("zf04 Dly Pingpong12", dict(Type="Pingpong 1:2")), ("zf05 Dly EQ10", dict(EQCt=0.1)),
+                    ("zf06 Dly EQ90", dict(EQCt=0.9)), ("zf07 Dly Mix100 FB0", dict(Mix=1, FB=0)),
+                    ("zf08 Dly 1-8 tempo", dict(TDen="8", FB=0.3))):
+        r = base()
+        if kw is not None: unit(r, "Dly", **{**dly, **kw})
+        t[tag] = r
+    rev = dict(Type="Plate 1", LCut=0.25, HCut=0.25, Decy=0.5, HDmp=0.25, Mix=0.5)
+    for tag, kw in (("zf09 Rev Plate1", {}), ("zf10 Rev Plate1 Mix100", dict(Mix=1)), ("zf11 Rev Plate1 Decy10", dict(Decy=0.1)),
+                    ("zf12 Rev Plate1 Decy90", dict(Decy=0.9)), ("zf13 Rev Plate1 HDmp80", dict(HDmp=0.8)),
+                    ("zf14 Rev Plate1 Cuts80", dict(LCut=0.8, HCut=0.8)), ("zf15 Rev SmallRoom1", dict(Type="Small Room 1")),
+                    ("zf16 Rev LargeRoom1", dict(Type="Large Room 1")), ("zf17 Rev DenseRoom1", dict(Type="Dense Room 1")),
+                    ("zf18 Rev Hall", dict(Type="Hall"))):
+        r = base(); unit(r, "Rev", **{**rev, **kw}); t[tag] = r
+    for tag, kw in (("zf28 Rev SmallRoom1 Decy10", dict(Type="Small Room 1", Decy=0.1)), ("zf29 Rev SmallRoom1 Decy90", dict(Type="Small Room 1", Decy=0.9)),
+                    ("zf30 Rev LargeRoom1 Decy10", dict(Type="Large Room 1", Decy=0.1)), ("zf31 Rev LargeRoom1 Decy90", dict(Type="Large Room 1", Decy=0.9)),
+                    ("zf32 Rev DenseRoom1 Decy10", dict(Type="Dense Room 1", Decy=0.1)), ("zf33 Rev DenseRoom1 Decy90", dict(Type="Dense Room 1", Decy=0.9)),
+                    ("zf34 Rev SmallRoom1 HDmp80", dict(Type="Small Room 1", HDmp=0.8)), ("zf35 Rev Plate2", dict(Type="Plate 2")),
+                    ("zf36 Rev SmallRoom2", dict(Type="Small Room 2"))):
+        r = base(); unit(r, "Rev", **{**rev, **kw}); t[tag] = r
+    mfx = dict(Rat=0.25, Dep=0.5, Dly=0.5, FB=0, Wid=0.25, Mix=1)
+    for tag, kw in (("zf19 Chorus1", dict(Type="Chorus 1")), ("zf20 Chorus2", dict(Type="Chorus 2")),
+                    ("zf21 Ensemble1", dict(Type="Ensemble 1")), ("zf22 Ensemble2", dict(Type="Ensemble 2")),
+                    ("zf23 Flanger1", dict(Type="Flanger 1", FB=0.5)), ("zf24 Flanger2", dict(Type="Flanger 2", FB=0.5)),
+                    ("zf25 Phaser1", dict(Type="Phaser 1", FB=0.5)), ("zf26 Phaser2", dict(Type="Phaser 2", FB=0.5)),
+                    ("zf27 Chorus1 Mix50", dict(Type="Chorus 1", Mix=0.5))):
+        r = base(); unit(r, "MFX", **{**mfx, **kw}); t[tag] = r
+    for tag, kw in (("zf40 Chorus1 Rat75", dict(Type="Chorus 1", Rat=0.75)), ("zf41 Chorus1 Dep100", dict(Type="Chorus 1", Dep=1)),
+                    ("zf42 Chorus1 Dly10", dict(Type="Chorus 1", Dly=0.1)), ("zf43 Chorus1 Dly90", dict(Type="Chorus 1", Dly=0.9)),
+                    ("zf44 Flanger1 Dly10", dict(Type="Flanger 1", Dly=0.1, FB=0.5)), ("zf45 Flanger1 Dly90", dict(Type="Flanger 1", Dly=0.9, FB=0.5)),
+                    ("zf46 Flanger1 FB0", dict(Type="Flanger 1")), ("zf47 Chorus2 Rat5", dict(Type="Chorus 2", Rat=0.05)),
+                    ("zf48 Ensemble1 Rat5", dict(Type="Ensemble 1", Rat=0.05))):
+        r = base(); unit(r, "MFX", **{**mfx, **kw}); t[tag] = r
+    # Mix destinations driven by Knob 1 (Autm C04 = 1), for the short-note sequence.
+    r = base(); unit(r, "Rev", **{**rev, "Mix": 0}); conn(r, 0, "Knob 1", "FX", "Reverb Mix", 50); r.find("Autm").set("C04", "1")
+    t["zf49 Rev Plate1 KnobMix50"] = r
+    r = base(); unit(r, "Dly", **{**dly, "Mix": 0}); conn(r, 0, "Knob 1", "FX", "Delay Mix", 50); r.find("Autm").set("C04", "1")
+    t["zf50 Dly Stereo KnobMix50"] = r
+    def osc(r, typ, sub=None, **kw):
+        o = r.find("Voice/Osc/Osc0"); o.set("Type", typ)
+        if sub:
+            e = o.find(sub)
+            for k, val in kw.items(): e.set(k, str(val))
+    ns = dict(Mix=0.75, FlOf=0, Dtn=0.25, Sprd=0.75)
+    for tag, kw in (("zn01 NS Mix0", dict(Mix=0)), ("zn02 NS Mix50", dict(Mix=0.5)), ("zn03 NS Mix100", dict(Mix=1)),
+                    ("zn04 NS Mix100 Dtn75", dict(Mix=1, Dtn=0.75)), ("zn05 NS Mix100 FlOf100", dict(Mix=1, FlOf=1))):
+        r = base(); osc(r, "NanoSaw", "NS", **{**ns, **kw}); t[tag] = r
+    r = base(); osc(r, "PD", "PD", Wave="Saw", PD=0.5); t["zn06 PD Saw50"] = r
+    r = base(); osc(r, "PD", "PD", Wave="Square", PD=0.5); t["zn07 PD Square50"] = r
+    r = base(); osc(r, "Noise", "Nois", Type="White", Deci=0); t["zn08 Noise White"] = r
+    r = base(); osc(r, "Analog", "Anlg", Wave="Saw", Sync="ANALOG", SRat=0.25, SShp=1); t["zn09 Sync SRat25"] = r
+    for tag, kw, f3 in (("zm01 FormM v0", dict(Type="Formant-M", FVwl=0), 0), ("zm02 FormM v50", dict(Type="Formant-M", FVwl=0.5), 0),
+                        ("zm03 FormM v100", dict(Type="Formant-M", FVwl=1), 0), ("zm04 FormM v50 Q50", dict(Type="Formant-M", FVwl=0.5, Q=0.5), 0),
+                        ("zm05 FormM v50 Q100", dict(Type="Formant-M", FVwl=0.5, Q=1), 0), ("zm06 FormF v50", dict(Type="Formant-F", FVwl=0.5), 0),
+                        ("zm07 F3 FormM v50", dict(Type="Formant-M", FVwl=0.5), 1), ("zm08 FormM v50 c20", dict(Type="Formant-M", FVwl=0.5, CutO=0.2), 0),
+                        ("zm09 FormF v0", dict(Type="Formant-F", FVwl=0), 0)):
+        r = base(); osc(r, "Noise", "Nois", Type="White", Deci=0)
+        if f3: f3_(r, **kw)
+        else: F1(r, **kw)
+        t[tag] = r
+    for tag, kw in (("zm10 FormM c50 v0", dict(Type="Formant-M", CutO=0.5, FVwl=0, Q=0.5)),
+                    ("zm11 FormM c50 v50", dict(Type="Formant-M", CutO=0.5, FVwl=0.5, Q=0.5)),
+                    ("zm12 FormM c50 v100", dict(Type="Formant-M", CutO=0.5, FVwl=1, Q=0.5)),
+                    ("zm13 FormF c50 v50", dict(Type="Formant-F", CutO=0.5, FVwl=0.5, Q=0.5)),
+                    ("zm14 FormM c30 v50", dict(Type="Formant-M", CutO=0.3, FVwl=0.5, Q=0.5)),
+                    ("zm15 FormM c70 v50", dict(Type="Formant-M", CutO=0.7, FVwl=0.5, Q=0.5)),
+                    ("zm16 FormM c50 v50 Q0", dict(Type="Formant-M", CutO=0.5, FVwl=0.5, Q=0))):
+        r = base(); osc(r, "Noise", "Nois", Type="White", Deci=0); F1(r, **kw); t[tag] = r
     t["zd1 DeepBass noF23"] = preset("Deep Bass", f2_off=1, f3_off=1)
     t["zd2 DeepBass noLFO"] = preset("Deep Bass", clear=(3, 4, 5))
     t["zd3 DeepBass uni1"] = preset("Deep Bass", uni=1)

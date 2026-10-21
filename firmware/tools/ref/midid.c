@@ -1,7 +1,7 @@
 // midid <fifo>: virtual CoreMIDI source "ObsRef" for NS2 reference renders (NS2 listens to every
 // MIDI input). Reads commands from the FIFO, one per line:
-//   on <note> <vel> | off <note> | cc <num> <val> | pc <prog> | wait <ms> | seq | quit
-// "seq" plays the reference sequence with timestamps, so the timing does not depend on this process.
+//   on <note> <vel> | off <note> | cc <num> <val> | pc <prog> | wait <ms> | seq | fxseq | quit
+// "seq" and "fxseq" play a sequence of seq.h with timestamps, so the timing does not depend on this process.
 #include <CoreMIDI/CoreMIDI.h>
 #include <mach/mach_time.h>
 #include <stdio.h>
@@ -33,10 +33,13 @@ int main(int argc, char** argv) {
       else if (!strcmp(cmd, "cc")) send3(0xb0, a, b, 0);
       else if (!strcmp(cmd, "pc")) send3(0xc0, a, 0, 0);
       else if (!strcmp(cmd, "wait")) usleep(a * 1000);
-      else if (!strcmp(cmd, "seq")) {
+      else if (!strcmp(cmd, "seq") || !strcmp(cmd, "fxseq")) {
+        const int fx = !strcmp(cmd, "fxseq");
+        const struct RefEvent* seq = fx ? kFxSeq : kRefSeq;
+        const size_t count = fx ? kFxSeqCount : kRefSeqCount;
         MIDITimeStamp t0 = nowPlus(200);
-        for (size_t i = 0; i < kRefSeqCount; i++) {
-          const struct RefEvent* e = &kRefSeq[i];
+        for (size_t i = 0; i < count; i++) {
+          const struct RefEvent* e = &seq[i];
           send3(0x90, e->note, e->vel, t0 + (uint64_t)(e->t * 1e9 * tb.denom / tb.numer));
           send3(0x80, e->note, 0, t0 + (uint64_t)((e->t + e->dur) * 1e9 * tb.denom / tb.numer));
         }
