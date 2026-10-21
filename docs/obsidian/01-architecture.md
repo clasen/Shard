@@ -17,15 +17,15 @@
 ## Signal flow
 
 ```
-                 ┌────────────────── VOICE (×N, + unison) ────────────────────┐
- note/vel ──►    │  Osc1 ─┐                                                   │
-                 │  Osc2 ─┼─► [FilterMix per osc] ─► F1 ─┐                    │
-                 │  Osc3 ─┘                        ─► F2 ─┴─► (routing) ─► VCA ─►│──┐
-                 │   ▲ ring mod Osc(n-1)×Osc(n) [I]                    ▲      │  │
-                 │   │                                          EnvA (fixed)  │  │
-                 │  Osc1 can bypass the filters / VCA (O1BP)                  │  │
-                 └───────────────────────────────────────────────────────────┘  │
-                                                                                 ▼
+                 ┌───────────────────── VOICE (×N, + unison) ─────────────────────┐
+ note/vel ──►    │  Osc1 ─┐                                                       │
+                 │  Osc2 ─┼─► [FilterMix per osc] ─► F1 ─┐                        │
+                 │  Osc3 ─┘                        ─► F2 ─┴─► (routing) ─► VCA ───┼──┐
+                 │   ▲ ring mod Osc(n-1)×Osc(n) [I]                       ▲       │  │
+                 │   │                                              EnvA (fixed)  │  │
+                 │  Osc1 can bypass the filters / VCA (O1BP)                      │  │
+                 └────────────────────────────────────────────────────────────────┘  │
+                                                                                     ▼
                                    Σ voices ─► Global filter (F3, stereo) ─► FX chain ─► out
                                                               MFX ─ Dly ─ Rev (order = Ord)
 ```
