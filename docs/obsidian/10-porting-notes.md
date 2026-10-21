@@ -130,7 +130,9 @@ opciones de placa que el benchmark):
   asignables con **MIDI learn** (`learn <param>` por serie; el mapa se guarda en la NVS).
   Por defecto: CC74 cutoff, CC71 resonancia, CC1 cantidad de envolvente de filtro, CC91
   reverb, CC7 volumen, CC5 glide, CC73 ataque, CC75 decay, CC79 sustain, CC72 release.
-  Parámetros asignables: `cut res env rev vol glide atk dec sus rel fdec det`.
+  Parámetros asignables: `cut res env rev vol glide atk dec sus rel fdec det lforate lfoamt`.
+  `lforate` y `lfoamt` mueven la velocidad (0.05–20 Hz) y la amplitud del LFO 2, que en el
+  layout de Obsidian va al cutoff (436 presets): el wobble del filtro.
 - La demo se apaga sola con la primera nota MIDI.
 - La opción de placa **USB Mode** elige el transporte MIDI:
 
@@ -151,7 +153,7 @@ conexión:
 |---|---|---|---|
 | Teclado (con OCT −/+) | notas canal 1 | notas canal 1 | notas |
 | X/Y pad | pitch bend + CC1 canal 1 | igual | bend ±2 st y cantidad de envolvente de filtro |
-| Knobs 1–8 | CC16–23 canal 16 | CC20–27 canal 1 | cut, res, atk, rel, fdec, det, rev, vol |
+| Knobs 1–8 | CC16–23 canal 16 | CC20–27 canal 1 | cut, res, atk, rel, lforate, lfoamt, rev, vol |
 | Pads 1–8 | notas 64–71 canal 2, con velocity | CC95–102 canal 1 (127 al apretar, 0 al soltar) | presets 0–7 |
 
 Los CCs de los knobs se superponen entre las dos disposiciones (CC20–23), así que el

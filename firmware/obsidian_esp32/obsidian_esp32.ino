@@ -144,9 +144,9 @@ static void audioTask(void*) {
 static float cc01(uint8_t v) { return (float)v / 127.0f; }
 
 // Knob-assignable parameters. Values arrive normalized 0..1 from a CC or the serial console.
-enum Param { kCut, kRes, kEnvAmt, kRev, kVol, kGlide, kAtk, kDec, kSus, kRel, kFdec, kDet, kParamCount };
-static const char* const kParamNames[kParamCount] = {"cut", "res", "env", "rev", "vol", "glide",
-                                                     "atk", "dec", "sus", "rel", "fdec", "det"};
+enum Param { kCut, kRes, kEnvAmt, kRev, kVol, kGlide, kAtk, kDec, kSus, kRel, kFdec, kDet, kLfoRate, kLfoAmt, kParamCount };
+static const char* const kParamNames[kParamCount] = {"cut", "res", "env", "rev", "vol", "glide", "atk",
+                                                     "dec", "sus", "rel", "fdec", "det", "lforate", "lfoamt"};
 static int8_t gCcMap[128];
 static volatile int gLearn = -1;
 static Preferences gPrefs;
@@ -172,6 +172,9 @@ static void setParam(int id, float x) {
     case kRel: p.ampEnv.release = 0.01f + 10.0f * x * x * x; break;
     case kFdec: p.filtEnv.decay = 0.01f + 10.0f * x * x * x; break;
     case kDet: p.osc[1].fine = 0.5f * x; break;
+    // LFO 2: the filter wobble of Obsidian's layout (LFO 2 -> Filter 1+2 Cutoff in 436 presets).
+    case kLfoRate: p.lfo[1].rate = 0.05f * powf(400.0f, x); break;  // 0.05..20 Hz
+    case kLfoAmt: p.lfo[1].ampl = x; break;
   }
 }
 
@@ -323,7 +326,7 @@ static const KorgLayout kKorgLayouts[] = {
 };
 // Each knob drives the same parameter in every preset, in the order of Obsidian's factory macros.
 // The preset's macros stay at its saved positions (Autm).
-static const int8_t kKorgKnobParams[8] = {kCut, kRes, kAtk, kRel, kFdec, kDet, kRev, kVol};
+static const int8_t kKorgKnobParams[8] = {kCut, kRes, kAtk, kRel, kLfoRate, kLfoAmt, kRev, kVol};
 
 // Returns the Korg pad pressed (0..7, -2 for its release), or -1 if the message is not a pad.
 static int korgPad(uint8_t ch, uint8_t status, uint8_t d1, uint8_t d2) {
@@ -407,7 +410,7 @@ static void printHelp() {
       "          CC1 filter env amount, CC91 reverb, CC7 volume, CC5 glide, CC123 all off.\n"
       "Serial commands:\n"
       "  on <note> [vel] | off <note> | demo 0|1\n"
-      "  <param> <0..1>   params: cut res env rev vol glide atk dec sus rel fdec det\n"
+      "  <param> <0..1>   params: cut res env rev vol glide atk dec sus rel fdec det lforate lfoamt\n"
       "  wave <osc 0..2> <0 sine|1 tri|2 saw|3 square>\n"
       "  preset <n>       0..7 Poly Pad Bass Lead Pluck Organ Brass Factory, then the content image\n"
       "                   (also Program Change)\n"
