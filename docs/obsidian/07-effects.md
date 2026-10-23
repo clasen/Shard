@@ -232,6 +232,25 @@ And "Hall" is Plate with a long pre-delay (see the preset table above).
 - `Decy` and `HDmp` reach the engines as size/decay and damping.
 - `Wet` and `Widt` enter squared when modulated; the stereo output is a mid/side mix driven by
   `Widt`.
+- **Output mix** (`0x1003eec3c`), with `w` the type's width and `g` the engine's gain, interpolated
+  over the block:
+
+  ```text
+  a    = g · wet / max(2·w + 1, 2)
+  outL = dry·in + a·(L + R) + a·w·(L − R)
+  outR = dry·in + a·(L + R) − a·w·(L − R)
+  ```
+
+  The struct slots do not line up with the XML names one to one (the slot that sets `w` sits
+  where `Dry` would be), but the behaviour matches the table above with `w = Widt` **[B]**: the
+  `* 1` types (`Widt` 0) have a **mono** wet signal, and the others keep `Widt` of the side.
+  Stereo NS2 renders confirm it: L/R correlation of the tail 0.91–0.98 for Plate 1, Dense, Small
+  and Large Room 1, 0.59 for Plate 2, 0.61 for Small Room 2 and 0.45 for the Hall **[P]**.
+- **Tank diffusion** (`0x1002b0e00`): with `Decy` above 0.25 the four tank allpasses use 0.742
+  and 0.712 (Dattorro's paper has 0.70 and 0.50); below, `0.5 + 0.968·Decy` and
+  `0.5 + 0.848·Decy` **[B]**. Which pair gets which value is **[?]**. The port keeps 0.7/0.5: the
+  decompiled values slow the decay by up to 45 % and do not change the early build-up, so they
+  would need the `Decy` table fitted again.
 
 **Measured against NS2 [P]** (tests `zf09`–`zf18`, `zf28`–`zf36`, `zf49`, with short notes):
 - **Mix**: the dry signal stays at 1 up to `Mix` 0.5 and falls to 0 at `Mix` 1
@@ -246,13 +265,21 @@ And "Hall" is Plate with a long pre-delay (see the preset table above).
   high-pass with the cutoffs above.
 - The Hall is the Plate with pre-delay; Plate 2 and Room 2 barely differ from their version 1.
 
-**In the port**: Plate, Plate 2, Hall and Dense Room use the Dattorro plate, and Small and Large
+**In the port**: the plate's 4 tank allpasses swing by NS2's 0.272 ms at ~1 Hz (rates and which
+allpasses: [I]); without it the tail repeated every tank loop (~0.65 s) and rang metallic at high
+`Mix`. The envelope autocorrelation at the loop lag went from 0.11–0.29 to 0.06–0.14 (NS2: ~0.03).
+The wet signal goes through the mid/side mix above (`reverbWidth`): `Widt` for
+the Dattorro plate, and 0.55·`Widt` for Freeverb, whose port comes out wider than NS2's (L/R
+correlation −0.4 without the mix) **[P]**. Plate, Plate 2, Hall and Dense Room use the Dattorro plate, and Small and Large
 Room use Freeverb (8 combs and 4 allpasses per channel, with the plate's 4 diffusers at the
 input; without them, the early echoes came out 6 dB louder than in NS2). `obs2preset.py` maps
 `Decy` to each engine's feedback and sets the wet gain per type (tables `REVERB_DECAY` and
 `REVERB_GAIN` at three `Decy` points, fitted against the renders), `HDmp` to the damping,
 `HCut`/`LCut` to one-pole filters and the pre-delay from the preset table. The tests are within
-±2 dB of wet level and ±3 dB/s of decay.
+±2 dB of wet level and ±3 dB/s of decay. Still open: in the first 120–400 ms after a note the
+plate's wet signal is ~4 dB above NS2's (an energy bump at 180–240 ms, where the first pass of
+the output taps arrives), and Dense Room 1 at `Decy` 0.5 falls in two slopes in NS2 (fast for
+450 ms, then slower) that one feedback value cannot follow **[?]**.
 
 **For a port**: Freeverb and the Dattorro plate are public, documented algorithms. With the
 lengths above, both families can be reproduced. On the ESP32 a single global instance (not per

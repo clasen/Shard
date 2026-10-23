@@ -85,11 +85,14 @@ t_vel     = VTim·(64/127 − v)
 t_key     = n > c ? (KTim > 0 ? (n − c)·KTim/c : 0)
                   : (KTim < 0 ? (n − c)·KTim/c : 0)
 output   ×= vel_level · key_level
-times    ×= 2^(3·(t_vel + t_key))
+speed    ×= 2^(3·(t_vel + t_key))          // computed as exp2f(3·(t_vel + 1 + t_key)) · 0.125
 ```
 
 - With `VLev = 0.4`, a note with `v = 0.3` comes out at 0.72 of the level, not 0.3.
-- The time factor probably applies to every stage **[I]**; the call is to `exp2f` **[I]**.
+- The factor multiplies the envelope's **step** (`0x1005316ac`: `dt · factor`), so it divides
+  the stage times **[B]**: a positive `KTim` makes the notes above `KCtr` faster, and `VTim > 0`
+  makes loud notes slower. Physical String (`KCtr` 12, `KTim` 0.18) decays as fast as NS2 only
+  this way, and Electric Piano 2, BassGroove and Classic Acid moved closer to NS2 **[P]**.
 
 ### Curves (`AC`, `DC`, `SC`, `RC`)
 

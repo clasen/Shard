@@ -31,7 +31,8 @@ enum NoiseType { kNoiseWhite, kNoiseLowPass, kNoiseHighPass, kNoiseBandPass, kNo
 enum FilterType { kFilterLP24A, kFilterLP12D, kFilterLP12A, kFilterHP12A, kFilterHP24A, kFilterHP12D,
                   kFilterBP6A, kFilterBP12A, kFilterNotch6A, kFilterNotch12A, kFilterOff,
                   kFilterEQPeak, kFilterEQShelf, kFilterFormantM, kFilterFormantF,
-                  kFilterWSTube, kFilterWSSoft, kFilterWSHard, kFilterWSEnhance, kFilterWSSine, kFilterWSTri };
+                  kFilterWSTube, kFilterWSSoft, kFilterWSHard, kFilterWSEnhance, kFilterWSSine, kFilterWSTri,
+                  kFilterCombPos, kFilterCombNeg };
 constexpr int kShapes = 6;         // WS Tube .. WS Tri
 constexpr int kShapeLen = 1025;    // NS2's waveshaper tables: a ramp from -1 to 1 through the curve
 enum EnvType { kEnvADSR, kEnvAD, kEnvBipolar };
@@ -85,7 +86,7 @@ constexpr float kPitchCoarseRange = 100.0f, kPitchFineRange = 1.0f;
 // Master trim before the soft clip (+2 dB): keeps the loudness the board had before the amp envelope was
 // squared like NS2's, which made the mix about 5 dB quieter [I].
 constexpr float kOutputTrim = 1.26f;
-constexpr float kClipKnee = 0.5f;  // the output soft clip is linear below this level
+constexpr float kClipKnee = 0.9f;  // the output soft clip is linear below this level; the limiter keeps under it
 
 // ---------------------------------------------------------------------------
 // Band-limited wavetables, one mip per octave starting at kMipBaseHz.
@@ -211,6 +212,31 @@ struct SampleZone {
   const Sample* sample;
 };
 
+// A Slate kit (NS2's sample drum machine) as content2bin.py stores it; the firmware reads it in
+// place from the content image. Each pad layers up to 3 one-shot samples through a filter and an
+// envelope. Times in seconds, pitches in semitones, levels linear [I].
+constexpr int kKitPads = 32;
+constexpr int kPadSamples = 3;
+struct KitSample {
+  int32_t sample;  // index into the image's samples, -1 = none
+  float level, pan, pitch, offset;  // offset: start position, 0..1 of the sample
+  uint8_t reverse, unused[3];
+};
+struct KitPad {
+  uint8_t note, group, filterType, filterOn;  // filterType: 0 LP 6, 1 LP 12, 2 HP 6, 3 HP 12, 4 BP
+  float level, pan;
+  float attack, hold, decay, breakLevel, decay2, velLevel;  // decay, decay2 < 0: never
+  float pitch;
+  float cutoff, q, cutoffVel;  // cutoff 0..1 as Obsidian's; velocity opens it by cutoffVel [I]
+  KitSample s[kPadSamples];
+};
+struct Kit {
+  char name[40];
+  uint8_t groupPoly[kKitPads];  // voices allowed per pad group (group 0 and 0 = no limit)
+  KitPad pad[kKitPads];
+};
+static_assert(sizeof(KitSample) == 24 && sizeof(KitPad) == 124 && sizeof(Kit) == 4040, "content2bin.py's kit layout");
+
 // ---------------------------------------------------------------------------
 // Patch: a subset of the Obsidian parameters, in the same units as the .obs XML.
 // ---------------------------------------------------------------------------
@@ -261,7 +287,8 @@ struct OscPatch {
   float pdAmount = 0.5f;
 };
 
-// Velocity and key scaling taken at note-on (decompiled from NS2, 05-envelopes-lfos.md).
+// Velocity and key scaling taken at note-on (decompiled from NS2, 05-envelopes-lfos.md). `time`
+// multiplies the stage times.
 struct EnvScale {
   float level, time;
 };
@@ -277,7 +304,9 @@ static EnvScale envScale(const EnvPatch& p, int note, float vel) {
   }
   const float velTime = p.vTim * (64.0f / 127.0f - vel);
   const float velLevel = p.vLev > 0.0f ? 1.0f + p.vLev * (vel - 1.0f) : 1.0f + p.vLev * vel;
-  return {velLevel * key, exp2f(3.0f * (velTime + keyTime))};
+  // NS2 multiplies the envelope's step by 2^(3*(velTime + keyTime)) (0x1005316ac): positive KTim
+  // makes the notes above KCtr faster.
+  return {velLevel * key, exp2f(-3.0f * (velTime + keyTime))};
 }
 
 struct LfoPatch {
@@ -362,6 +391,7 @@ struct Patch {
   float filterPan = 0.5f;     // Pan of F1's output
   float drive = 0.0f;  // Drv of F1
   float vowel = 0.5f;  // FVwl of F1 (Formant types)
+  float combMix = 1.0f;  // CMix of F1 (Comb types)
   FilterRoute route = kRouteStereo;
   bool osc1Bypass = false;    // O1BP=FILTER: Osc 1 skips both filters
   // F2, in the units of F1's fields.
@@ -372,6 +402,7 @@ struct Patch {
     float envAmt = 0.0f;  // Filter Env -> Filter 2 Cutoff
     float drive = 0.0f;
     float vowel = 0.5f;
+    float combMix = 1.0f;
   } f2;
   EnvPatch ampEnv, filtEnv, pitchEnv, env4, env5;
   LfoPatch lfo[kLfos];
@@ -392,6 +423,9 @@ struct Patch {
   float reverbGain = 1.0f;     // wet level at Mix 1
   float reverbHpHz = 20.0f, reverbLpHz = 20000.0f;  // HCut / LCut on the wet signal
   float reverbPre = 0.0f, reverbPreMix = 0.0f;      // pre-delay (s) and its crossfade (PDel, PDMx)
+  float reverbWidth = 1.0f;    // side gain of the wet signal (from Widt): 0 = mono, 1 = the engine's own stereo
+  const Kit* kit = nullptr;    // a Slate kit: the notes play its pads instead of the voices
+  const Sample* kitSamples = nullptr;  // the samples its pads index
   float volume = 0.5f;
   PhaserPatch phaser;
   ChorusPatch chorus;
@@ -471,12 +505,12 @@ template <class F> void forEachField(Patch& p, F&& f) {
   }
   at(p.cutoff, "cutoff"); at(p.resonance, "resonance"); at(p.keyTrack, "keyTrack"); at(p.filterEnvAmt, "filterEnvAmt");
   at(p.filterType, "filterType"); at(p.filterGain, "filterGain"); at(p.shelfGain, "shelfGain");
-  at(p.filterPan, "filterPan"); at(p.drive, "drive"); at(p.vowel, "vowel"); at(p.route, "route");
+  at(p.filterPan, "filterPan"); at(p.drive, "drive"); at(p.vowel, "vowel"); at(p.combMix, "combMix"); at(p.route, "route");
   at(p.osc1Bypass, "osc1Bypass");
   at(p.f2.enabled, "f2.enabled"); at(p.f2.type, "f2.type"); at(p.f2.cutoff, "f2.cutoff");
   at(p.f2.resonance, "f2.resonance"); at(p.f2.keyTrack, "f2.keyTrack"); at(p.f2.gain, "f2.gain");
   at(p.f2.shelfGain, "f2.shelfGain"); at(p.f2.pan, "f2.pan"); at(p.f2.envAmt, "f2.envAmt");
-  at(p.f2.drive, "f2.drive"); at(p.f2.vowel, "f2.vowel");
+  at(p.f2.drive, "f2.drive"); at(p.f2.vowel, "f2.vowel"); at(p.f2.combMix, "f2.combMix");
   env(p.ampEnv, "ampEnv"); env(p.filtEnv, "filtEnv"); env(p.pitchEnv, "pitchEnv"); env(p.env4, "env4"); env(p.env5, "env5");
   for (int i = 0; i < kLfos; i++) {
     LfoPatch& l = p.lfo[i];
@@ -501,6 +535,7 @@ template <class F> void forEachField(Patch& p, F&& f) {
   at(p.glide, "glide"); at(p.mono, "mono"); at(p.reverbMix, "reverbMix"); at(p.reverbDecay, "reverbDecay");
   at(p.reverbRoom, "reverbRoom"); at(p.reverbDamp, "reverbDamp"); at(p.reverbGain, "reverbGain");
   at(p.reverbHpHz, "reverbHpHz"); at(p.reverbLpHz, "reverbLpHz"); at(p.reverbPre, "reverbPre"); at(p.reverbPreMix, "reverbPreMix");
+  at(p.reverbWidth, "reverbWidth");
   at(p.volume, "volume");
   at(p.phaser.enabled, "phaser.enabled"); at(p.phaser.stages, "phaser.stages"); at(p.phaser.rate, "phaser.rate");
   at(p.phaser.depth, "phaser.depth"); at(p.phaser.feedback, "phaser.feedback"); at(p.phaser.width, "phaser.width");
@@ -881,7 +916,8 @@ struct Filter {
   static bool onLadder(FilterType t) {
     return t == kFilterLP24A || t == kFilterLP12A || t == kFilterHP12A || t == kFilterHP24A || (t >= kFilterBP6A && t <= kFilterNotch12A);
   }
-  static bool shaper(FilterType t) { return t >= kFilterWSTube; }
+  static bool shaper(FilterType t) { return t >= kFilterWSTube && t <= kFilterWSTri; }
+  static bool comb(FilterType t) { return t == kFilterCombPos || t == kFilterCombNeg; }
   static constexpr float kWsIn = 2311.0f, kWsOut = 0.61f;  // table index per unit of d; output
 
   // `drive` (Drv) sets the ladder's saturator and the waveshapers' input gain. NS2's WaveShape setup
@@ -900,7 +936,7 @@ struct Filter {
       wsOut = kWsOut * (1.0f - 0.3f * d) * (s == 0 ? 1.5f : 1.0f);
       return;
     }
-    if (t == kFilterOff) return;
+    if (t == kFilterOff || comb(t)) return;
     if (onLadder(t)) { ladder.set(hz, q, drive, t); return; }
     if (t == kFilterEQPeak || t == kFilterEQShelf) { bq.setEq(t == kFilterEQPeak, hz, t == kFilterEQPeak ? 0.25f + 7.75f * q * q : q, gainDb); return; }
     const float qq = q * (hz < 40.0f ? hz / 40.0f : 1.0f);
@@ -1374,6 +1410,61 @@ struct PhaseDist {
   }
 };
 
+// ---------------------------------------------------------------------------
+// Comb filter (Comb Pos/Neg), as decompiled from NS2 (04-filters.md): the global filter F3, and
+// F1/F2 in each voice:
+//   tap = delay[sr/Hz]                       (linear interpolation, 2048-sample buffer)
+//   h   = hp*h + (tap - tapPrev)             (DC blocker, hp = 1 - 2*pi*5/sr)
+//   buf = in + fb*h;   out = dry*in + wet*h
+//   fb  = +-q/(q + 0.0618*(1-q)) (max 0.999), dry = 1 - 0.3*CMix, wet = +-dry*CMix
+// ---------------------------------------------------------------------------
+struct Comb {
+  static constexpr int kLen = 2048;
+  float* buf = nullptr;
+  int idx = 0;
+  float delay = -1.0f, tapPrev = 0, h = 0;  // delay < 0: the next block starts at its target
+
+  void init() { buf = (float*)heap_caps_calloc(kLen, sizeof(float), MALLOC_CAP_SPIRAM); }
+
+  void clear() {
+    if (buf) memset(buf, 0, sizeof(float) * kLen);
+    idx = 0; delay = -1.0f; tapPrev = 0; h = 0;
+  }
+
+  // The global filter: its cutoff does not follow the note.
+  void process(const CombPatch& p, float* x, float mod, float qMod) {
+    run(x, 20.0f * exp2f(9.81378f * (p.cutoff + mod)), Noise::clamp01(p.q + qMod), p.mix, p.negative);
+  }
+
+  void run(float* x, float hz, float q, float mix, bool negative) {
+    hz = hz < 20.0f ? 20.0f : (hz > 18000.0f ? 18000.0f : hz);
+    float target = kSampleRate / hz;
+    if (target > kLen - 2) target = kLen - 2;
+    if (delay < 0.0f) delay = target;
+    const float step = (target - delay) * (1.0f / kBlock);
+    const float cmix = Noise::clamp01(mix);
+    float fb = q < 1e-6f ? 0.0f : q / (q + 0.0618030f * (1.0f - q));
+    if (fb > 0.999f) fb = 0.999f;
+    const float dry = 1.0f - 0.3f * cmix;
+    float wet = dry * cmix;
+    if (negative) { fb = -fb; wet = -wet; }
+    const float hp = 1.0f - 6.28318531f * 5.0f / kSampleRate;
+    for (int n = 0; n < kBlock; n++) {
+      delay += step;
+      float pos = (float)idx - delay;
+      if (pos < 0.0f) pos += kLen;
+      int i0 = (int)pos;
+      float frac = pos - (float)i0;
+      float tap = buf[i0] + (buf[(i0 + 1) & (kLen - 1)] - buf[i0]) * frac;
+      h = hp * h + (tap - tapPrev);
+      tapPrev = tap;
+      buf[idx] = x[n] + fb * h;
+      idx = (idx + 1) & (kLen - 1);
+      x[n] = dry * x[n] + wet * h;
+    }
+  }
+};
+
 // The envelopes of a patch by matrix index: Amp, Filter, Pitch, Env 4, Env 5.
 static inline const EnvPatch& envPatch(const Patch& p, int i) {
   const EnvPatch* e[kEnvs] = {&p.ampEnv, &p.filtEnv, &p.pitchEnv, &p.env4, &p.env5};
@@ -1388,6 +1479,8 @@ struct Voice {
   NanoSaw nano[3];
   PhaseDist pd[3];
   Filter filter, filter2;
+  Comb comb[2];  // F1/F2 as Comb Pos/Neg; Engine::init gives them their buffers
+  float combHz[2] = {}, combQ[2] = {};  // their cutoff and Q of this block
   Envelope env[kEnvs];  // Amp, Filter, Pitch, Env 4, Env 5
   EnvScale envSc[kEnvs];  // velocity/key scaling taken at note-on
   Lfo lfo[kLfos];
@@ -1400,6 +1493,7 @@ struct Voice {
   bool gate = false;  // key held: a mono note-on glides legato only while the previous key is down
   float pitch = 0, targetPitch = 0, ampStart = 0, detune = 0, slowCut = 0;
   bool fresh = false;  // first block of a note on an idle voice
+  bool shed = false;   // dropped for CPU: fades to silence over its next block, then goes idle
   float retrigPrev[kEnvs] = {};  // last block's Retrigger input per envelope
   float gainL = 1, gainR = 1;  // unison pan and level
   float oscGain[3] = {1, 1, 1};  // velocity layer/split gains (velocityGains)
@@ -1428,6 +1522,7 @@ struct Voice {
     velocity = vel;
     for (float& r : rand) r = Lfo::uniform(1.0f);
     sustained = false;
+    shed = false;
     gate = true;
     targetPitch = (float)n;
     if (glide <= 0.0f || !active()) pitch = targetPitch;
@@ -1436,6 +1531,8 @@ struct Voice {
       // An idle voice keeps the filter state it had when its envelope ended; with no fade-in that
       // state would start the note with a click.
       filter = Filter(); filter2 = Filter();
+      if (Filter::comb(p.filterType)) comb[0].clear();
+      if (Filter::comb(p.f2.type)) comb[1].clear();
     }
     // Each note starts at POff: in NS2 two saws a half cycle apart cancel their odd harmonics.
     for (int i = 0; i < 3; i++) osc[i].phase = (uint32_t)(uint64_t)(p.osc[i].phaseOffset * 4294967296.0);  // POff 1 wraps to 0
@@ -1457,6 +1554,13 @@ struct Voice {
   }
 
   // `global` holds the engine-wide sources (pitch wheel, knobs, pads) from kSrcPitchWheel on.
+  // F1 (k 0) or F2 (k 1) on one bus, with the bus scaled by `gain` first.
+  void runFilter(int k, Filter& f, FilterType t, float combMix, float* x, float gain) {
+    if (!Filter::comb(t)) { f.run(x, gain); return; }
+    for (int n = 0; n < kBlock; n++) x[n] *= gain;
+    if (comb[k].buf) comb[k].run(x, combHz[k], combQ[k], combMix, t == kFilterCombNeg);
+  }
+
   void render(const Patch& p, const float* global, float* outL, float* outR) {
     const float dt = (float)kBlock / kSampleRate;
     if (p.glide > 0.0f) {
@@ -1507,6 +1611,7 @@ struct Voice {
     // velocity 40 with VLev 1 at -20 dB, measured against NS2 renders (10-porting-notes.md).
     float aEnd = ampShape * ampGain;
     aEnd *= aEnd;
+    if (shed) { aEnd = 0.0f; env[0].stage = Envelope::kIdle; env[0].value = 0; shed = false; }
     // An idle voice starts at its first block's level: NS2 has no fade-in with Attack 0.
     if (fresh) { ampStart = aEnd; fresh = false; }
     float aStep = (aEnd - ampStart) * (1.0f / kBlock);
@@ -1522,12 +1627,14 @@ struct Voice {
     float cutHz = 20.0f * exp2f(9.81378f * cutNorm) * powf(noteHz / 130.8128f, p.keyTrack);
     const float res = Noise::clamp01(p.resonance + vm[kDstQ - kDstCutoff]);
     filter.set(p.filterType, cutHz, res, p.shelfGain, Noise::clamp01(p.drive + vm[kDstDrive - kDstCutoff]), cutNorm, p.vowel);
+    combHz[0] = cutHz; combQ[0] = res;
     const bool split = p.route != kRouteStereo, useF2 = split && p.f2.enabled;
     if (useF2) {
       const float cut2 = p.f2.cutoff + p.f2.envAmt * src[kSrcEnv1 + 1] + vm[kDstCutoff2 - kDstCutoff] + slowCut;
       const float hz2 = 20.0f * exp2f(9.81378f * cut2) * powf(noteHz / 130.8128f, p.f2.keyTrack);
-      filter2.set(p.f2.type, hz2, Noise::clamp01(p.f2.resonance + vm[kDstQ2 - kDstCutoff]), p.f2.shelfGain,
-                  Noise::clamp01(p.f2.drive + vm[kDstDrive2 - kDstCutoff]), cut2, p.f2.vowel);
+      combHz[1] = hz2; combQ[1] = Noise::clamp01(p.f2.resonance + vm[kDstQ2 - kDstCutoff]);
+      filter2.set(p.f2.type, hz2, combQ[1], p.f2.shelfGain, Noise::clamp01(p.f2.drive + vm[kDstDrive2 - kDstCutoff]), cut2,
+                  p.f2.vowel);
     }
 
     // Raw oscillator outputs; an oscillator at level 0 still runs when the next one ring-modulates it.
@@ -1643,12 +1750,12 @@ struct Voice {
 
     // Filter outputs: the gains include OGn and the voice convention of half level into the ladder.
     const float g1 = 0.5f * fmaxf(p.filterGain + 2.0f * vm[kDstFilterGain - kDstCutoff], 0.0f);
-    filter.run(bus1, g1);
+    runFilter(0, filter, p.filterType, p.combMix, bus1, g1);
     // SERIES adds F1's output to the F2 bus; a disabled F2 passes its bus through.
     const bool series = p.route == kRouteSeries;
     if (useF2) {
       if (series) for (int n = 0; n < kBlock; n++) bus2[n] += 2.0f * bus1[n];
-      filter2.run(bus2, 0.5f * fmaxf(p.f2.gain + 2.0f * vm[kDstFilterGain2 - kDstCutoff], 0.0f));
+      runFilter(1, filter2, p.f2.type, p.f2.combMix, bus2, 0.5f * fmaxf(p.f2.gain + 2.0f * vm[kDstFilterGain2 - kDstCutoff], 0.0f));
     } else if (split) {
       for (int n = 0; n < kBlock; n++) bus2[n] = 0.5f * bus2[n] + (series ? bus1[n] : 0.0f);
     }
@@ -1697,8 +1804,41 @@ struct AllpassLine {
   }
 };
 
+// An allpass whose delay swings by +-excursion with a slow sine, read with linear interpolation:
+// the modulated tank allpass of Dattorro's plate. The sine is a rotating phasor.
+struct ModAllpass {
+  Line l;
+  float g = 0.7f, base = 0, exc = 0, c = 1, s = 0, kc = 1, ks = 0;
+  void init(float seconds, float gain, float excursion, float hz, float phase) {
+    l.init(seconds + 2.0f * excursion);
+    g = gain;
+    base = seconds * kSampleRate;
+    exc = excursion * kSampleRate;
+    kc = cosf(6.28318531f * hz / kSampleRate);
+    ks = sinf(6.28318531f * hz / kSampleRate);
+    c = cosf(phase);
+    s = sinf(phase);
+  }
+  inline float tick(float x) {
+    const float nc = c * kc - s * ks;
+    s = s * kc + c * ks;
+    c = nc;
+    const float dl = base + exc * s;
+    const int i = (int)dl;
+    const float a = l.tap(i), d = a + (l.tap(i + 1) - a) * (dl - (float)i);
+    const float v = x - g * d;
+    l.push(v);
+    return d + g * v;
+  }
+  void renormalize() { const float r = 1.0f / sqrtf(c * c + s * s); c *= r; s *= r; }
+};
+
 struct Plate {
-  AllpassLine diff[4], apA, apB, ap2A, ap2B;
+  // NS2's tank has 4 modulation LFOs and swings its allpasses by 0.272 ms (07-effects.md) [B];
+  // that they drive the 4 tank allpasses, and the ~1 Hz rates (Dattorro's), are [I].
+  static constexpr float kExcursion = 0.000272f;
+  AllpassLine diff[4];
+  ModAllpass apA, apB, ap2A, ap2B;
   Line dA, d2A, dB, d2B;
   float lpA = 0, lpB = 0, bw = 0;
   bool ok = false;
@@ -1708,13 +1848,16 @@ struct Plate {
     diff[1].init(0.003583f, 0.75f);
     diff[2].init(0.012721f, 0.625f);
     diff[3].init(0.009297f, 0.625f);
-    apA.init(0.022562f, 0.7f); dA.init(0.149433f); ap2A.init(0.060408f, 0.5f); d2A.init(0.124830f);
-    apB.init(0.030454f, 0.7f); dB.init(0.141519f); ap2B.init(0.089138f, 0.5f); d2B.init(0.106145f);
-    ok = dA.buf && dB.buf && d2A.buf && d2B.buf;
+    apA.init(0.022562f, 0.7f, kExcursion, 0.9f, 0.0f); dA.init(0.149433f);
+    ap2A.init(0.060408f, 0.5f, kExcursion, 0.7f, 0.8f); d2A.init(0.124830f);
+    apB.init(0.030454f, 0.7f, kExcursion, 1.1f, 1.57f); dB.init(0.141519f);
+    ap2B.init(0.089138f, 0.5f, kExcursion, 1.3f, 2.4f); d2B.init(0.106145f);
+    ok = dA.buf && dB.buf && d2A.buf && d2B.buf && apA.l.buf && apB.l.buf && ap2A.l.buf && ap2B.l.buf;
   }
 
   void process(const float* in, float* outL, float* outR, float decay, float damp) {
     for (int n = 0; n < kBlock; n++) tick(in[n], decay, damp, outL[n], outR[n]);
+    apA.renormalize(); apB.renormalize(); ap2A.renormalize(); ap2B.renormalize();
   }
 
   inline void tick(float in, float decay, float damp, float& outL, float& outR) {
@@ -1794,51 +1937,6 @@ struct Freeverb {
       for (auto& d : diff) x = d.tick(x);
       outL[n] = channel(0, x, fb, damp);
       outR[n] = channel(1, x, fb, damp);
-    }
-  }
-};
-
-// ---------------------------------------------------------------------------
-// Global comb filter (F3 Comb Pos/Neg), as decompiled from NS2 (04-filters.md):
-//   tap = delay[sr/Hz]                       (linear interpolation, 2048-sample buffer)
-//   h   = hp*h + (tap - tapPrev)             (DC blocker, hp = 1 - 2*pi*5/sr)
-//   buf = in + fb*h;   out = dry*in + wet*h
-//   fb  = +-q/(q + 0.0618*(1-q)) (max 0.999), dry = 1 - 0.3*CMix, wet = +-dry*CMix
-// Like the other global filters, it does not follow the note.
-// ---------------------------------------------------------------------------
-struct Comb {
-  static constexpr int kLen = 2048;
-  float* buf = nullptr;
-  int idx = 0;
-  float delay = 100.0f, tapPrev = 0, h = 0;
-
-  void init() { buf = (float*)heap_caps_calloc(kLen, sizeof(float), MALLOC_CAP_SPIRAM); }
-
-  void process(const CombPatch& p, float* x, float mod, float qMod) {
-    float hz = 20.0f * exp2f(9.81378f * (p.cutoff + mod));
-    hz = hz < 20.0f ? 20.0f : (hz > 18000.0f ? 18000.0f : hz);
-    float target = kSampleRate / hz;
-    if (target > kLen - 2) target = kLen - 2;
-    const float step = (target - delay) * (1.0f / kBlock);
-    const float q = Noise::clamp01(p.q + qMod), cmix = Noise::clamp01(p.mix);
-    float fb = q < 1e-6f ? 0.0f : q / (q + 0.0618030f * (1.0f - q));
-    if (fb > 0.999f) fb = 0.999f;
-    const float dry = 1.0f - 0.3f * cmix;
-    float wet = dry * cmix;
-    if (p.negative) { fb = -fb; wet = -wet; }
-    const float hp = 1.0f - 6.28318531f * 5.0f / kSampleRate;
-    for (int n = 0; n < kBlock; n++) {
-      delay += step;
-      float pos = (float)idx - delay;
-      if (pos < 0.0f) pos += kLen;
-      int i0 = (int)pos;
-      float frac = pos - (float)i0;
-      float tap = buf[i0] + (buf[(i0 + 1) & (kLen - 1)] - buf[i0]) * frac;
-      h = hp * h + (tap - tapPrev);
-      tapPrev = tap;
-      buf[idx] = x[n] + fb * h;
-      idx = (idx + 1) & (kLen - 1);
-      x[n] = dry * x[n] + wet * h;
     }
   }
 };
@@ -1990,9 +2088,117 @@ struct Phaser {
 // ---------------------------------------------------------------------------
 // Engine: voice allocation, block rendering, multi-FX, reverb.
 // ---------------------------------------------------------------------------
+// One hit of a Slate pad: its samples summed, filtered, shaped by the envelope and panned.
+struct DrumVoice {
+  static constexpr int kChokeBlocks = 3;  // a choked hit fades out over ~4 ms
+  const KitPad* pad = nullptr;
+  const Sample* smp[kPadSamples] = {};
+  int64_t pos[kPadSamples] = {};  // 32.32 positions; reverse samples step backwards
+  int64_t step[kPadSamples] = {};
+  float gain[kPadSamples] = {};
+  float level = 0, ampStart = 0, t = 0, lp = 0, gainL = 1, gainR = 1, onePole = 0;
+  Biquad bq;
+  uint32_t age = 0;
+  int choke = 0;  // blocks left of a choke fade, 0 = none
+  bool active = false;
+
+  void start(const KitPad& p, const Sample* samples, float vel) {
+    pad = &p;
+    for (int k = 0; k < kPadSamples; k++) {
+      const KitSample& ks = p.s[k];
+      smp[k] = ks.sample >= 0 ? &samples[ks.sample] : nullptr;
+      if (!smp[k] || smp[k]->length < 2) { smp[k] = nullptr; continue; }
+      const double rate = smp[k]->rate * exp2((p.pitch + ks.pitch) / 12.0) * 4294967296.0;
+      const int64_t start = (int64_t)(Noise::clamp01(ks.offset) * (smp[k]->length - 2)) << 32;
+      step[k] = ks.reverse ? -(int64_t)rate : (int64_t)rate;
+      pos[k] = ks.reverse ? ((int64_t)(smp[k]->length - 2) << 32) - start : start;
+      // x0.5: the factory samples peak near full scale; the 808 kick's long sub drove the output's
+      // soft clip (knee at half scale) even at the default volume at unity.
+      gain[k] = ks.level * (0.5f / 32768.0f);
+    }
+    level = p.level * (1.0f - p.velLevel * (1.0f - vel));
+    const float pan = Noise::clamp01(p.pan);
+    gainL = pan > 0.5f ? 2.0f * (1.0f - pan) : 1.0f;  // linear balance, unity at the centre
+    gainR = pan < 0.5f ? 2.0f * pan : 1.0f;
+    if (p.filterOn) {
+      const float hz = 20.0f * exp2f(9.81378f * Noise::clamp01(p.cutoff + p.cutoffVel * vel));
+      lp = 1.0f - expf(-6.28318531f * fminf(hz, 0.45f * kSampleRate) / kSampleRate);
+      bq = Biquad();
+      const float q = 0.5f + 5.5f * p.q * p.q;
+      if (p.filterType == 1) bq.set(kNoiseLowPass, hz, q);
+      else if (p.filterType == 3) bq.set(kNoiseHighPass, hz, q);
+      else if (p.filterType == 4) bq.set(kNoiseBandPass, hz, q);
+    }
+    onePole = 0;
+    t = 0;
+    ampStart = envelope(0.0f);
+    choke = 0;
+    active = true;
+  }
+
+  // The envelope's level at time t: attack, hold, decay to the break level, decay 2 to silence.
+  float envelope(float at) const {
+    const KitPad& p = *pad;
+    if (at < p.attack) return at / p.attack;
+    at -= p.attack;
+    if (at < p.hold || p.decay < 0.0f) return 1.0f;
+    at -= p.hold;
+    if (at < p.decay) return 1.0f + (p.breakLevel - 1.0f) * at / p.decay;
+    at -= p.decay > 0.0f ? p.decay : 0.0f;
+    if (p.decay2 < 0.0f) return p.breakLevel;
+    return at < p.decay2 ? p.breakLevel * (1.0f - at / p.decay2) : 0.0f;
+  }
+
+  void render(float* outL, float* outR) {
+    float x[kBlock] = {};
+    bool playing = false;
+    for (int k = 0; k < kPadSamples; k++) {
+      if (!smp[k]) continue;
+      const Sample& sm = *smp[k];
+      const int64_t last = (int64_t)(sm.length - 1) << 32;
+      int64_t ps = pos[k];
+      const int64_t st = step[k];
+      const float g = gain[k];
+      int n = 0;
+      for (; n < kBlock && ps >= 0 && ps < last; n++, ps += st) {
+        const uint32_t i = (uint32_t)(ps >> 32);
+        const float f = (float)(uint32_t)ps * (1.0f / 4294967296.0f);
+        x[n] += g * (sm.data[i] + (sm.data[i + 1] - sm.data[i]) * f);
+      }
+      pos[k] = ps;
+      if (n < kBlock) smp[k] = nullptr;
+      else playing = true;
+    }
+    if (pad->filterOn) {
+      if (pad->filterType == 0 || pad->filterType == 2) {
+        const bool hp = pad->filterType == 2;
+        for (int n = 0; n < kBlock; n++) {
+          onePole += lp * (x[n] - onePole);
+          x[n] = hp ? x[n] - onePole : onePole;
+        }
+      } else {
+        bq.run(x);
+      }
+    }
+    t += (float)kBlock / kSampleRate;
+    float aEnd = envelope(t);
+    if (choke) aEnd *= (float)(--choke) / kChokeBlocks;
+    float a = ampStart * level;
+    const float aStep = (aEnd - ampStart) * level * (1.0f / kBlock);
+    for (int n = 0; n < kBlock; n++, a += aStep) {
+      outL[n] += x[n] * a * gainL;
+      outR[n] += x[n] * a * gainR;
+    }
+    ampStart = aEnd;
+    if (!playing || aEnd <= 0.0f) active = false;
+  }
+};
+
 struct Engine {
+  static constexpr int kDrumVoices = 16;
   Patch patch;
   Voice voices[kVoices];
+  DrumVoice drums[kDrumVoices];
   Plate plate;
   Freeverb room;
   Line reverbPre;               // pre-delay, up to the Hall's 350 ms
@@ -2002,6 +2208,7 @@ struct Engine {
   Delay delay;
   Comb combL, combR;  // the global filter is stereo
   Filter f3L, f3R;
+  float dcIn[2] = {}, dcOut[2] = {};  // DC blocker states of the voice mix
   Lfo lfo[kLfos];  // free-running LFOs for the engine-wide destinations
   uint32_t clock = 0;
   float wheel = 0;            // pitch wheel, -1..1
@@ -2011,17 +2218,20 @@ struct Engine {
 
   void init() {
     plate.init(); room.init(); reverbPre.init(0.35f); combL.init(); combR.init(); delay.init(); chorus.init();
+    for (auto& v : voices) { v.comb[0].init(); v.comb[1].init(); }
     for (int i = 0; i < kLfos; i++) lfo[i].start(patch.lfo[i], 0.0f);
   }
 
   // Loads a patch; the knobs and pads jump to the positions the preset was saved with.
   void setPatch(const Patch& p) {
+    if (p.kit != patch.kit) chokeDrums(0);
     patch = p;
     memcpy(macro, p.macro, sizeof(macro));
   }
 
   void noteOn(int note, int vel) {
     if (vel == 0) { noteOff(note); return; }
+    if (patch.kit) { drumOn(note, vel); return; }
     const int uni = patch.unison < 1 ? 1 : (patch.unison > 4 ? 4 : patch.unison);
     if (patch.mono) {  // voices 0..uni-1 play the one note, stacked in unison
       const bool legato = voices[0].active() && voices[0].gate;
@@ -2072,7 +2282,42 @@ struct Engine {
     v.gainR = g * 2.0f * pan;
   }
 
+  // Every pad of the note starts a hit; a pad's group keeps at most its polyphony of hits, choking
+  // the oldest (open and closed hi-hats share one).
+  void drumOn(int note, int vel) {
+    const Kit& kit = *patch.kit;
+    for (int i = 0; i < kKitPads; i++) {
+      const KitPad& p = kit.pad[i];
+      if (p.note != note) continue;
+      const int poly = p.group ? kit.groupPoly[p.group] : 0;
+      if (poly > 0) {
+        int playing = 0;
+        for (auto& d : drums) playing += d.active && !d.choke && d.pad->group == p.group;
+        for (; playing >= poly; playing--) {
+          DrumVoice* oldest = nullptr;
+          for (auto& d : drums)
+            if (d.active && !d.choke && d.pad->group == p.group && (!oldest || d.age < oldest->age)) oldest = &d;
+          oldest->choke = DrumVoice::kChokeBlocks;
+        }
+      }
+      DrumVoice* pick = nullptr;
+      for (auto& d : drums) if (!d.active) { pick = &d; break; }
+      if (!pick) {
+        pick = &drums[0];
+        for (auto& d : drums) if (d.age < pick->age) pick = &d;
+      }
+      pick->age = ++clock;
+      pick->start(p, patch.kitSamples, (float)vel / 127.0f);
+    }
+  }
+
+  // Fades out the hits of a group (0: all of them).
+  void chokeDrums(int group) {
+    for (auto& d : drums) if (d.active && (!group || d.pad->group == group)) d.choke = DrumVoice::kChokeBlocks;
+  }
+
   void noteOff(int note) {
+    if (patch.kit) return;  // one-shot pads play out
     for (auto& v : voices) {
       if (v.note != note || !v.active() || v.env[0].stage == Envelope::kRelease) continue;
       if (sustain) v.sustained = true;
@@ -2086,19 +2331,25 @@ struct Engine {
     for (auto& v : voices) if (v.sustained) { v.sustained = false; v.release(patch); }
   }
 
-  void allOff() { for (auto& v : voices) { v.sustained = false; v.release(patch); } }
+  void allOff() {
+    for (auto& v : voices) { v.sustained = false; v.release(patch); }
+    chokeDrums(0);
+  }
 
-  int activeVoices() const { int n = 0; for (auto& v : voices) n += v.active(); return n; }
+  int activeVoices() const {
+    int n = 0;
+    for (auto& v : voices) n += v.active();
+    for (auto& d : drums) n += d.active;
+    return n;
+  }
 
-  // Overload protection: silences the oldest sounding voice at once. Called when a block took
-  // more than the audio budget, so a heavy preset drops notes instead of starving the MIDI loop.
+  // Overload protection: fades the oldest sounding voice out over one block (a cut to zero
+  // clicks). Called when a block took more than the audio budget, so a heavy preset drops notes
+  // instead of starving the MIDI loop.
   void shedOldest() {
     Voice* oldest = nullptr;
-    for (auto& v : voices) if (v.active() && (!oldest || v.age < oldest->age)) oldest = &v;
-    if (!oldest) return;
-    oldest->env[0].stage = Envelope::kIdle;
-    oldest->env[0].value = 0;
-    oldest->ampStart = 0;
+    for (auto& v : voices) if (v.active() && !v.shed && (!oldest || v.age < oldest->age)) oldest = &v;
+    if (oldest) oldest->shed = true;
   }
 
   // Dry mono mix of all voices for one block.
@@ -2110,6 +2361,12 @@ struct Engine {
     src[kSrcPitchWheelUp] = wheel > 0.0f ? wheel : 0.0f;
     src[kSrcPitchWheelDown] = wheel < 0.0f ? -wheel : 0.0f;
     memcpy(src + kSrcMacro1, macro, sizeof(macro));
+    for (auto& d : drums) if (d.active) d.render(dryL, dryR);
+    if (patch.kit) {
+      blockDc(dryL, 0);
+      blockDc(dryR, 1);
+      return;
+    }
     const Voice* newest = nullptr;
     for (auto& v : voices) {
       if (!v.active()) continue;
@@ -2143,6 +2400,22 @@ struct Engine {
         for (int n = 0; n < kBlock; n++) { dryL[n] *= 2.0f; dryR[n] *= 2.0f; }
       }
     }
+    blockDc(dryL, 0);
+    blockDc(dryR, 1);
+  }
+
+  // NS2's output carries no DC: an FM Saw Down with feedback, whose mean is far from zero, comes out
+  // centred with the offset decaying at tau = 32 ms, a one-pole high-pass at ~5 Hz (04-filters.md) [P].
+  void blockDc(float* x, int ch) {
+    constexpr float kPole = 1.0f - 2.0f * (float)M_PI * 5.0f / kSampleRate;
+    float in = dcIn[ch], out = dcOut[ch];
+    for (int n = 0; n < kBlock; n++) {
+      out = kPole * out + x[n] - in;
+      in = x[n];
+      x[n] = out;
+    }
+    dcIn[ch] = in;
+    dcOut[ch] = out;
   }
 
   static constexpr float kGlobalWsIn = 0.4f, kGlobalWsOut = 5.0f;
@@ -2182,6 +2455,11 @@ struct Engine {
         revLp[c] += lp * ((ch[c][n] - revHp[c]) - revLp[c]);
         ch[c][n] = revLp[c] * p.reverbGain;
       }
+    for (int n = 0; n < kBlock; n++) {
+      const float m = 0.5f * (wl[n] + wr[n]), side = 0.5f * p.reverbWidth * (wl[n] - wr[n]);
+      wl[n] = m + side;
+      wr[n] = m - side;
+    }
   }
 
   // Multi-FX (phaser or chorus) then Delay, in place on the stereo voice mix (the reverb follows on core 0).
@@ -2195,6 +2473,38 @@ struct Engine {
     if (patch.delay.enabled && delay.ok) delay.process(patch.delay, global[4], l, r);
   }
 
+  // Stereo-linked peak limiter with one block of lookahead: the gain is down to what the loudest
+  // sample needs before that sample plays, and recovers over ~80 ms, so loud chords are turned down
+  // instead of clipped. The output is one block (1.3 ms) late.
+  struct Limiter {
+    static constexpr float kCeiling = 0.89f;                      // -1 dBFS
+    static constexpr float kRelease = 1.0f - 0.98348f;            // 1 - exp(-block / 80 ms)
+    float l[kBlock] = {}, r[kBlock] = {};
+    float need = 1.0f, g = 1.0f;  // gain the delayed block needs; gain at the end of the last block
+
+    void process(float* L, float* R) {
+      float next = 1.0f;
+      for (int n = 0; n < kBlock; n++) {
+        const float peak = fmaxf(fabsf(L[n]), fabsf(R[n]));
+        if (peak * next > kCeiling) next = kCeiling / peak;
+      }
+      const float target = fminf(need, next);
+      const float end = target < g ? target : g + (target - g) * kRelease;
+      const float step = (end - g) * (1.0f / kBlock);
+      float a = g;
+      for (int n = 0; n < kBlock; n++, a += step) {
+        const float dl = l[n], dr = r[n];
+        l[n] = L[n];
+        r[n] = R[n];
+        L[n] = dl * a;
+        R[n] = dr * a;
+      }
+      g = end;
+      need = next;
+    }
+  };
+  Limiter limiter;
+
   // Linear up to kClipKnee, then bends smoothly (slope 1 at the knee) towards full scale.
   static float softClip(float x) {
     const float a = fabsf(x);
@@ -2203,17 +2513,19 @@ struct Engine {
     return copysignf(kClipKnee + (1.0f - kClipKnee) * u / (1.0f + u), x);
   }
 
-  // Mixes dry + (already computed) wet, applies volume and soft clip, writes 16-bit stereo.
-  void mixOut(const float* dryL, const float* dryR, const float* wetL, const float* wetR, int16_t* out) const {
+  // Mixes dry + (already computed) wet, applies volume, the limiter and the soft clip, writes 16-bit stereo.
+  void mixOut(const float* dryL, const float* dryR, const float* wetL, const float* wetR, int16_t* out) {
     // NS2's mix keeps the dry at full level up to Mix 0.5 and fades it out above (07-effects.md).
     const float wet = reverbReady() ? reverbMix() : 0.0f, dryGain = fminf(1.0f, 2.0f * (1.0f - wet));
+    float l[kBlock], r[kBlock];
     for (int n = 0; n < kBlock; n++) {
-      float l = (dryL[n] * dryGain + wetL[n] * wet) * patch.volume * kOutputTrim;
-      float r = (dryR[n] * dryGain + wetR[n] * wet) * patch.volume * kOutputTrim;
-      l = softClip(l);
-      r = softClip(r);
-      out[2 * n] = (int16_t)(l * 32767.0f);
-      out[2 * n + 1] = (int16_t)(r * 32767.0f);
+      l[n] = (dryL[n] * dryGain + wetL[n] * wet) * patch.volume * kOutputTrim;
+      r[n] = (dryR[n] * dryGain + wetR[n] * wet) * patch.volume * kOutputTrim;
+    }
+    limiter.process(l, r);
+    for (int n = 0; n < kBlock; n++) {
+      out[2 * n] = (int16_t)(softClip(l[n]) * 32767.0f);
+      out[2 * n + 1] = (int16_t)(softClip(r[n]) * 32767.0f);
     }
   }
 };

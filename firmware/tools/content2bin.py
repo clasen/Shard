@@ -1,27 +1,40 @@
 #!/usr/bin/env python3
-"""Builds the content image of the ESP32 port: the NS2 Obsidian presets as data, plus the
-wavetables and samples they use. The firmware maps it from the "content" flash partition
+"""Builds the content image of the ESP32 port: the NS2 Obsidian presets and Slate kits as data,
+plus the wavetables and samples they use. The firmware maps it from the "content" flash partition
 (firmware/obsidian_esp32/content.h) and lists its presets after the built-in ones.
 
-  python3 -I content2bin.py <out.bin> [--samples <preset.obs> ...] <preset.obs | folder> ...
+  python3 -I content2bin.py <out.bin> [--samples <preset.obs> ...] [--thin <preset.obs> ...]
+                            <preset.obs | kit.slt | folder> ...
 
-Folders are searched for .obs presets. A preset is left out, and listed, when one of its
-oscillators has a type the engine lacks (obs2preset.py would disable it), or when it plays
+Folders are searched for .obs presets and .slt kits. A preset is left out, and listed, when one
+of its oscillators has a type the engine lacks (obs2preset.py would disable it), or when it plays
 samples and was not named after --samples (samples are large: name only the presets whose
-samples should go into the image).
+samples should go into the image). --thin also takes a sample preset and keeps every other key
+zone of each oscillator, stretching the kept zones over the dropped ones: about half the samples,
+each pitched further.
+
+A Slate kit becomes a preset of the Drums pad named "Kit <name>" whose one record points at the
+kit. Its pads play their .wav samples; .mwav samples (NS2's multisample format) are left out and
+listed with the parameters the firmware does not play.
 
 Each preset is the C++ obs2preset.py writes, stored as records: the field path ("osc[0].level")
 in a shared path table, and the value. Layout, little endian:
 
-  header   "OBSC", u32 version (1), u32 total, then (u32 offset, u32 count) for samples,
-           wavetables, paths, zones and presets
+  header   "OBSC", u32 version (2), u32 total, then (u32 offset, u32 count) for samples,
+           wavetables, paths, zones, presets and kits
   sample   char name[32], u32 offset, length, loop start, loop end (exclusive; 0 = none), rate, 0
   table    char name[48], u32 offset, u32 frames, f32 scale, 0; data int16[frames][11][1025]
   path     char path[48]
   zone     char file[32], u8 lo, hi, root, loop, f32 tune, vol
   preset   char name[40], u8 category, 3 x u8 0, u32 offset, u32 record count
   record   u16 path, u8 kind (0 value, 1 wavetable index, 2 zones: first | count << 16,
-           3 clearMod), u8 0, f32 value or u32
+           3 clearMod, 4 kit index), u8 0, f32 value or u32
+  kit      char name[40], u8 group polyphony[32] (0 = no limit), 32 pads
+  pad      u8 note, group, filter type (0 LP 6, 1 LP 12, 2 HP 6, 3 HP 12, 4 BP), filter on,
+           f32 level, pan, attack, hold, decay, break level, decay 2 (decays < 0: none),
+           velocity to level, pitch (semitones), cutoff, Q, velocity to cutoff, 3 samples
+  pad sample  i32 sample index (-1 = none), f32 level, pan, pitch (semitones), start offset,
+           u8 reverse, 3 x u8 0
   data     every block starts on a 4-byte boundary
 
 Flash it at the offset of the "content" partition (firmware/tools/partitions_content.csv):
@@ -30,10 +43,12 @@ Flash it at the offset of the "content" partition (firmware/tools/partitions_con
 
 The output is derived from NanoStudio 2 content and the presets' samples: keep it local.
 """
+import hashlib
 import os
 import re
 import struct
 import sys
+import xml.etree.ElementTree as ET
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -42,13 +57,18 @@ import tbl2h  # noqa: E402
 
 FIRMWARE = os.path.join(HERE, "..", "obsidian_esp32")
 PARTITION_SIZE = 0xDE0000  # "content" in partitions_content.csv
-HEADER = struct.Struct("<4s12I")
+HEADER = struct.Struct("<4s14I")
 SAMPLE = struct.Struct("<32s6I")
 TABLE = struct.Struct("<48s2IfI")
 PATH = struct.Struct("<48s")
 ZONE = struct.Struct("<32s4B2f")
 PRESET = struct.Struct("<40sB3x2I")
-RECORD_VALUE, RECORD_TABLE, RECORD_ZONES, RECORD_CLEAR = 0, 1, 2, 3
+KIT = struct.Struct("<40s32B")
+KIT_PAD = struct.Struct("<4B12f")
+KIT_SAMPLE = struct.Struct("<i4fB3x")
+RECORD_VALUE, RECORD_TABLE, RECORD_ZONES, RECORD_CLEAR, RECORD_KIT = 0, 1, 2, 3, 4
+NS2 = "/Applications/NanoStudio 2.app/Wrapper/NanoStudio 2.app"
+KIT_FILTERS = {"LP 6": 0, "LP 12": 1, "HP 6": 2, "HP 12": 3, "BP": 4}
 
 # Pad categories, in the order of the Korg pads (obsidian_esp32.ino). NS2's Tags decide first: in
 # the factory presets bit 19 marks drums (24 of 27 named so), 2 bass (39/41), 0 lead (9/9), 1 pad
@@ -151,11 +171,12 @@ class Image:
         self.paths = {}     # path -> index
         self.zones = []     # (file, lo, hi, root, loop, tune, vol)
         self.presets = []   # (name, category, records)
+        self.kits = []      # (name, group polyphony, pads)
 
     def path(self, p):
         return self.paths.setdefault(p, len(self.paths))
 
-    def add(self, path, sample_folders):
+    def add(self, path, sample_folders, thin=False):
         """Converts one preset; returns why it was left out, or None."""
         root = obs2preset.load(path)
         name = os.path.splitext(os.path.basename(path))[0]
@@ -168,7 +189,13 @@ class Image:
         folder = path if os.path.isdir(path) else os.path.dirname(path)
         if conv.samples and os.path.realpath(folder) not in sample_folders:
             return "plays samples (name it after --samples to include them)"
+        stmts = list(statements(conv.code))
+        if thin:
+            stmts = [(kind, (body[0], thin_zones(body[1])) if kind == "zones" else body) for kind, body in stmts]
+        used = {z[0] for kind, body in stmts if kind == "zones" for z in body[1]}
         for s in conv.samples:
+            if s not in used:
+                continue
             wav = os.path.join(folder, s)
             if not os.path.exists(wav):
                 return f"sample {s} not found"
@@ -177,7 +204,7 @@ class Image:
             self.samples.setdefault(s, wav)
         symbols = {f"&k{sym}": wt for wt, sym in conv.tables.items()}
         zone_lists, records = {}, []
-        for kind, body in statements(conv.code):
+        for kind, body in stmts:
             if kind == "zones":
                 zone_lists[body[0]] = (len(self.zones), len(body[1]))
                 self.zones += [(f, lo, hi, rt, lp, tn, vl) for f, lo, hi, rt, tn, vl, lp in body[1]]
@@ -204,6 +231,62 @@ class Image:
         tags = int(root.get("Tags", "0"))
         self.presets.append((name, category(name, os.path.basename(os.path.dirname(path)), tags), records))
         return None
+
+    def add_kit(self, path):
+        """Converts one Slate kit into a kit and its Drums preset; returns what it does not play."""
+        root = ET.parse(os.path.join(path, "Package.slt")).getroot()
+        name = "Kit " + os.path.splitext(os.path.basename(path))[0]
+        midi, groups = root.find("MIDI"), root.find("ExGrp")
+        poly = [int(groups.get(f"P{g + 1:02d}", "0")) for g in range(32)]
+        gaps, pads = set(), []
+        for pad in root.find("Pads"):
+            amp, flt, pitch, osc = pad.find("Amp"), pad.find("Filt"), pad.find("Pitch"), pad.find("Osc")
+            samples = []
+            for o in osc:
+                ref = o.find("Samp/Smpl")
+                f = ref.get("File") if ref is not None else ""
+                if not f or f.endswith(".mwav"):
+                    if f:
+                        gaps.add(".mwav samples")
+                    samples.append(None)
+                    continue
+                wav = f.replace("/AppRes", NS2) if f.startswith("/") else os.path.join(path, f)
+                key = os.path.splitext(os.path.basename(wav))[0][:24] + "~" + hashlib.md5(
+                    os.path.realpath(wav).encode()).hexdigest()[:6]
+                self.samples.setdefault(key, wav)
+                samp = o.find("Samp")
+                samples.append((key, num(o.get("Lev")), num(o.get("Pan")), num(o.get("Trn")) + num(o.get("Dtn")),
+                                num(samp.get("SOff")), samp.get("SDir") == "Reverse"))
+            if osc.get("Type") != "Layer":
+                gaps.add(f"velocity split {osc.get('Type')} (layered)")
+            if pad.get("TM") != "One-Shot":
+                gaps.add(f"trigger mode {pad.get('TM')} (one-shot)")
+            if pad.get("OBus") not in (None, "None"):
+                gaps.add("FX buses")
+            if pad.find("WS") is not None and pad.find("WS").get("En") == "On":
+                gaps.add("waveshaper")
+            if num(pitch.get("AL")) != 0:
+                gaps.add("pitch envelope")
+            if num(flt.get("AL")) != 0:
+                gaps.add("filter envelope")
+            ftype = KIT_FILTERS.get(flt.get("Type"))
+            if flt.get("En") == "On" and ftype is None:
+                gaps.add(f"filter {flt.get('Type')}")
+            inf = lambda v: -1.0 if v == "INF" else num(v)
+            pads.append((int(midi.get(pad.tag, "0")), int(pad.get("Grp", "0")), ftype or 0,
+                         1 if flt.get("En") == "On" and ftype is not None else 0,
+                         (num(pad.get("Lev")), num(pad.get("Pan")), num(amp.get("A")), num(amp.get("H")),
+                          inf(amp.get("D")), num(amp.get("S")), inf(amp.get("D2")), num(amp.get("VL")),
+                          num(pitch.get("Trn")) + num(pitch.get("Dtn")), num(flt.get("CutO")), num(flt.get("Q")),
+                          num(flt.get("Vel"))),
+                         samples))
+        fx = root.find("FX")
+        if fx.find("Rev").get("En") == "1" or fx.find("Dly").get("En") == "1":
+            gaps.add("reverb/delay sends")
+        self.presets.append((name, PAD_ORDER.index("Drums"),
+                             [(self.path("kit"), RECORD_KIT, len(self.kits)), (self.path("reverbMix"), RECORD_VALUE, 0.0)]))
+        self.kits.append((name, poly, pads))
+        return sorted(gaps)
 
     def write(self, out_path):
         blob = bytearray(HEADER.size)
@@ -268,14 +351,44 @@ class Image:
                 blob += struct.pack("<HBx", path, kind) + packed
         blob[table_at:table_at + len(b"".join(rows))] = b"".join(rows)
         sections.append((table_at, len(self.presets)))
+        # Kits
+        align()
+        sections.append((len(blob), len(self.kits)))
+        index = {name: i for i, name in enumerate(self.samples)}
+        for name, poly, pads in self.kits:
+            blob += KIT.pack(name.encode()[:39], *poly)
+            for note, group, ftype, fon, values, samples in pads:
+                blob += KIT_PAD.pack(note, group, ftype, fon, *values)
+                for s in samples:
+                    blob += KIT_SAMPLE.pack(-1, 0, 0.5, 0, 0, 0) if s is None else KIT_SAMPLE.pack(index[s[0]], *s[1:5], s[5])
         align()
         flat = [v for sec in sections for v in sec]
-        blob[0:HEADER.size] = HEADER.pack(b"OBSC", 1, len(blob), *flat)
+        blob[0:HEADER.size] = HEADER.pack(b"OBSC", 2, len(blob), *flat)
         if len(blob) > PARTITION_SIZE:
             sys.exit(f"image is {len(blob)} bytes, the content partition holds {PARTITION_SIZE}")
         with open(out_path, "wb") as f:
             f.write(blob)
         return len(blob)
+
+
+def num(v):
+    return float(v) if v not in (None, "") else 0.0
+
+
+def thin_zones(zones):
+    """Every other zone of a key-zone list (f, lo, hi, root, tune, vol, loop); each dropped zone's
+    range goes half to the zone below it and half to the one above."""
+    z = sorted(zones, key=lambda t: t[1])
+    if len(z) < 3:
+        return z
+    keep = [list(t) for t in z[::2]]
+    for j in range(1, len(z), 2):
+        if j == len(z) - 1:
+            keep[-1][2] = z[j][2]
+            continue
+        mid = (z[j][1] + z[j][2]) // 2
+        keep[(j - 1) // 2][2], keep[(j + 1) // 2][1] = mid, mid + 1
+    return [tuple(t) for t in keep]
 
 
 def read_wav(path):
@@ -324,15 +437,15 @@ def read_wav(path):
 
 
 def presets_in(path):
-    if path.endswith(".obs"):
+    if path.endswith((".obs", ".slt")):
         return [path]
     found = []
     for dirpath, dirs, files in os.walk(path):
         for d in dirs:
-            if d.endswith(".obs"):
+            if d.endswith((".obs", ".slt")):
                 found.append(os.path.join(dirpath, d))
         found += [os.path.join(dirpath, f) for f in files if f.endswith(".obs") and f != "Package.obs"]
-        dirs[:] = [d for d in dirs if not d.endswith(".obs")]
+        dirs[:] = [d for d in dirs if not d.endswith((".obs", ".slt"))]
     return sorted(found)
 
 
@@ -340,34 +453,47 @@ def main():
     args = sys.argv[1:]
     if len(args) < 2:
         sys.exit(__doc__)
-    out_path, sample_presets, sources = args[0], [], []
+    out_path, sample_presets, thin, sources = args[0], [], set(), []
     i = 1
     while i < len(args):
-        if args[i] == "--samples":
+        if args[i] in ("--samples", "--thin"):
             sample_presets.append(args[i + 1].rstrip("/"))
+            if args[i] == "--thin":
+                thin.add(os.path.realpath(args[i + 1].rstrip("/")))
             i += 2
         else:
             sources.append(args[i].rstrip("/"))
             i += 1
     sample_folders = {os.path.realpath(p if os.path.isdir(p) else os.path.dirname(p)) for p in sample_presets}
-    image, skipped = Image(), []
-    for src in sources + sample_presets:
-        for preset in presets_in(src):
-            if any(name == os.path.splitext(os.path.basename(preset))[0] for name, _, _ in image.presets):
-                continue
-            why = image.add(preset, sample_folders)
-            if why:
-                skipped.append((preset, why))
+    image, skipped, partial = Image(), [], []
+    found = [preset for src in sources + sample_presets for preset in presets_in(src)]
+    # Kits first: the Drums pad starts at the first one.
+    for preset in sorted(found, key=lambda p: not p.endswith(".slt")):
+        if preset.endswith(".slt"):
+            gaps = image.add_kit(preset)
+            if gaps:
+                partial.append((preset, ", ".join(gaps)))
+            continue
+        if any(name == os.path.splitext(os.path.basename(preset))[0] for name, _, _ in image.presets):
+            continue
+        why = image.add(preset, sample_folders, os.path.realpath(preset) in thin)
+        if why:
+            skipped.append((preset, why))
     size = image.write(out_path)
     counts = [0] * len(PAD_ORDER)
     for _, cat, _ in image.presets:
         counts[cat] += 1
-    print(f"{out_path}: {len(image.presets)} presets, {len(image.tables)} wavetables, {len(image.samples)} samples, "
+    print(f"{out_path}: {len(image.presets)} presets ({len(image.kits)} kits), {len(image.tables)} wavetables, "
+          f"{len(image.samples)} samples, "
           f"{size} bytes ({100 * size / PARTITION_SIZE:.0f}% of the partition)")
     print("  per pad: " + ", ".join(f"{c} {n}" for c, n in zip(PAD_ORDER, counts)))
     print(f"Left out ({len(skipped)}):", file=sys.stderr)
     for preset, why in skipped:
         print(f"  {os.path.basename(preset)}: {why}", file=sys.stderr)
+    if partial:
+        print(f"Kits played without some of their parameters ({len(partial)}):", file=sys.stderr)
+    for preset, gaps in partial:
+        print(f"  {os.path.basename(preset)}: {gaps}", file=sys.stderr)
 
 
 if __name__ == "__main__":

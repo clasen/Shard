@@ -29,20 +29,24 @@ FILTER_TYPES = {"LP 24-A": "kFilterLP24A", "LP 12-D": "kFilterLP12D", "LP 12-A":
                 "EQ Peak": "kFilterEQPeak", "EQ Shelf": "kFilterEQShelf", "WS Tube": "kFilterWSTube",
                 "WS Soft": "kFilterWSSoft", "WS Hard": "kFilterWSHard", "WS Enhance": "kFilterWSEnhance",
                 "WS Sine": "kFilterWSSine", "WS Tri": "kFilterWSTri", "Formant-M": "kFilterFormantM",
-                "Formant-F": "kFilterFormantF"}
+                "Formant-F": "kFilterFormantF", "Comb Pos": "kFilterCombPos", "Comb Neg": "kFilterCombNeg"}
 
 
 CHORUS_TYPES = {"Chorus 1": "kChorus1", "Chorus 2": "kChorus2", "Ensemble 1": "kEnsemble1", "Ensemble 2": "kEnsemble2",
                 "Flanger 1": "kFlanger1", "Flanger 2": "kFlanger2"}
 # Reverb types (07-effects.md): engine (room = Freeverb, else the Dattorro plate), and the pre-delay
-# (s) and its crossfade from the Algoverb preset of the same name.
-REVERB_TYPES = {"Small Room 1": ("small", 0, 0), "Small Room 2": ("small", 0.0421, 0.495),
-                "Large Room 1": ("large", 0, 0), "Large Room 2": ("large", 0.0421, 0.495),
-                "Dense Room 1": ("dense", 0, 0), "Dense Room 2": ("dense", 0.0421, 0.495),
-                "Plate 1": ("plate", 0, 0), "Plate 2": ("plate", 0.0928, 0.402), "Hall": ("plate", 0.35, 0.303)}
+# (s), its crossfade and the stereo width from the Algoverb preset of the same name.
+REVERB_TYPES = {"Small Room 1": ("small", 0, 0, 0), "Small Room 2": ("small", 0.0421, 0.495, 0.638),
+                "Large Room 1": ("large", 0, 0, 0), "Large Room 2": ("large", 0.0421, 0.495, 0.638),
+                "Dense Room 1": ("dense", 0, 0, 0), "Dense Room 2": ("dense", 0.0421, 0.495, 0.638),
+                "Plate 1": ("plate", 0, 0, 0), "Plate 2": ("plate", 0.0928, 0.402, 0.638),
+                "Hall": ("plate", 0.35, 0.303, 0.658)}
+# Algoverb mixes its engine's output as mid + Widt*side (07-effects.md) [B]. The port's Freeverb rooms
+# come out wider than NS2's, so their side is scaled to the L/R correlation of NS2 stereo renders [P].
+REVERB_WIDTH = {"plate": 1.0, "dense": 1.0, "small": 0.55, "large": 0.55}
 # Engine feedback at Decy 0.1, 0.5 and 0.9, chosen so that the port's decay rate matches NS2 renders
 # (plate 81/27/5.9 dB/s, dense 168/57/17, small >400/61/18, large >400/81/35) [P].
-REVERB_DECAY = {"plate": (0.035, 0.55, 0.905), "dense": (0.0, 0.24, 0.708),
+REVERB_DECAY = {"plate": (0.07, 0.55, 0.905), "dense": (0.0, 0.24, 0.708),
                 "small": (0.1, 0.76, 0.932), "large": (0.1, 0.69, 0.875)}
 # Wet level at Mix 1 at the same Decy points, fitted to the early wet level of NS2 renders [P].
 REVERB_GAIN = {"plate": (3.4, 2.26, 2.0), "dense": (0.49, 3.8, 3.0), "small": (19.5, 19.5, 22.6), "large": (13.5, 13.5, 12.7)}
@@ -60,8 +64,8 @@ def interp3(points, decy):
 
 
 def reverb_fields(rev):
-    """The engine values of a Rev element: decay, damping, gain, the HCut/LCut corners and the pre-delay."""
-    kind, pre, premix = REVERB_TYPES[rev.get("Type")]
+    """The engine values of a Rev element: decay, damping, gain, the HCut/LCut corners, the pre-delay and the width."""
+    kind, pre, premix, widt = REVERB_TYPES[rev.get("Type")]
     decy, hdmp = num(rev.get("Decy")), num(rev.get("HDmp"))
     d0, d1 = REVERB_DAMP[kind]
     damp = min(max(d0 + (d1 - d0) * (hdmp - 0.25) / 0.55, 0.0), 0.95)
@@ -69,7 +73,8 @@ def reverb_fields(rev):
     lp = 200 + 21000 * (1 - num(rev.get("LCut"))) ** 3
     return (f"p.reverbDecay = {f(interp3(REVERB_DECAY[kind], decy))}; p.reverbRoom = {'true' if kind in ('small', 'large') else 'false'}; "
             f"p.reverbDamp = {f(damp)}; p.reverbGain = {f(interp3(REVERB_GAIN[kind], decy))};\n"
-            f"p.reverbHpHz = {f(hp)}; p.reverbLpHz = {f(lp)}; p.reverbPre = {f(pre)}; p.reverbPreMix = {f(premix)};")
+            f"p.reverbHpHz = {f(hp)}; p.reverbLpHz = {f(lp)}; p.reverbPre = {f(pre)}; p.reverbPreMix = {f(premix)}; "
+            f"p.reverbWidth = {f(REVERB_WIDTH[kind] * widt)};")
 
 
 def uses_drive(filter_type):
@@ -312,10 +317,11 @@ class Converter:
 
     @staticmethod
     def type_fields(q, flt):
-        """The Drv and FVwl assignments of a filter whose type uses them (NS2 ignores WSGn, 04-filters.md)."""
+        """The Drv, FVwl and CMix assignments of a filter whose type uses them (NS2 ignores WSGn, 04-filters.md)."""
         t = flt.get("Type")
         return ((f" {q}.drive = {f(num(flt.get('Drv')))};" if uses_drive(t) else "")
-                + (f" {q}.vowel = {f(num(flt.get('FVwl')))};" if t.startswith("Formant") else ""))
+                + (f" {q}.vowel = {f(num(flt.get('FVwl')))};" if t.startswith("Formant") else "")
+                + (f" {q}.combMix = {f(num(flt.get('CMix')))};" if t.startswith("Comb") else ""))
 
     # -- Filters ----------------------------------------------------------------------------
     def filters(self):

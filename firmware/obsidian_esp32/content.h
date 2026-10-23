@@ -1,5 +1,5 @@
 // Content image (firmware/tools/content2bin.py) in the "content" flash partition: samples,
-// wavetables and presets, memory-mapped with esp_partition_mmap and read through the cache.
+// wavetables, presets and Slate kits, memory-mapped with esp_partition_mmap and read through the cache.
 #pragma once
 
 #include <esp_partition.h>
@@ -17,6 +17,7 @@ struct Header {
   char magic[4];
   uint32_t version, total;
   uint32_t sampleOff, sampleCount, tableOff, tableCount, pathOff, pathCount, zoneOff, zoneCount, presetOff, presetCount;
+  uint32_t kitOff, kitCount;
 };
 struct SampleEntry { char name[32]; uint32_t offset, length, loopStart, loopEnd, rate, reserved; };
 struct TableEntry { char name[48]; uint32_t offset, frames; float scale; uint32_t reserved; };
@@ -24,8 +25,9 @@ struct PathEntry { char path[48]; };
 struct ZoneEntry { char file[32]; uint8_t lo, hi, root, loop; float tune, vol; };
 struct PresetEntry { char name[40]; uint8_t category, reserved[3]; uint32_t offset, count; };
 struct Record { uint16_t path; uint8_t kind, reserved; union { float f; uint32_t u; }; };
-// kRecZones packs the first zone in the low 16 bits and the zone count in the high 16.
-enum RecordKind : uint8_t { kRecValue, kRecTable, kRecZones, kRecClearMod };
+// kRecZones packs the first zone in the low 16 bits and the zone count in the high 16; kRecKit
+// holds the index of a kit.
+enum RecordKind : uint8_t { kRecValue, kRecTable, kRecZones, kRecClearMod, kRecKit };
 
 // What a path of the image's path table resolves to.
 struct Target { int16_t offset; syn::FieldKind kind; int8_t osc; };  // offset -1: table/zones of `osc`
@@ -59,7 +61,8 @@ static bool resolvePaths(const char** why) {
     if (gTargets[i].offset == -2 && sscanf(paths[i].path, "osc[%d].%7s", &osc, what) == 2 &&
         (!strcmp(what, "table") || !strcmp(what, "zones")))
       gTargets[i] = {-1, syn::kFieldF32, (int8_t)osc};
-    if (gTargets[i].offset == -2 && !strcmp(paths[i].path, "clearMod")) gTargets[i].offset = -1;
+    if (gTargets[i].offset == -2 && (!strcmp(paths[i].path, "clearMod") || !strcmp(paths[i].path, "kit")))
+      gTargets[i].offset = -1;
     if (gTargets[i].offset == -2) { *why = paths[i].path; return false; }  // a path this firmware lacks
   }
   return true;
@@ -71,7 +74,7 @@ static int begin(const char** why) {
       esp_partition_find_first(ESP_PARTITION_TYPE_DATA, (esp_partition_subtype_t)0x40, "content");
   if (!part) { *why = "no 'content' partition (see firmware/tools/partitions_content.csv)"; return -1; }
   Header h;
-  if (esp_partition_read(part, 0, &h, sizeof(h)) != ESP_OK || memcmp(h.magic, "OBSC", 4) || h.version != 1) {
+  if (esp_partition_read(part, 0, &h, sizeof(h)) != ESP_OK || memcmp(h.magic, "OBSC", 4) || h.version != 2) {
     *why = "the 'content' partition holds no image (flash one made by content2bin.py)";
     return -1;
   }
@@ -135,6 +138,12 @@ static void loadPreset(int i, syn::Patch& p) {
     const Target& t = gTargets[r->path];
     switch (r->kind) {
       case kRecClearMod: p.clearMod(); break;
+      case kRecKit:
+        if (r->u < gHeader->kitCount) {
+          p.kit = at<syn::Kit>(gHeader->kitOff) + r->u;
+          p.kitSamples = gSamples;
+        }
+        break;
       case kRecTable: p.osc[t.osc].table = r->u < gHeader->tableCount ? &gTables[r->u] : nullptr; break;
       case kRecZones: {
         const uint32_t first = r->u & 0xffff, count = r->u >> 16;

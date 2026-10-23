@@ -89,9 +89,14 @@ Then build the content image from your NanoStudio 2 presets and write it to the 
 ```bash
 python3 -I firmware/tools/content2bin.py content.bin \
   "/Applications/NanoStudio 2.app/Wrapper/NanoStudio 2.app/Factory/Instruments/Obsidian" \
-  "<folder with your own presets>"
+  "<folder with your own presets>" \
+  "/Applications/NanoStudio 2.app/Wrapper/NanoStudio 2.app/Factory/Instruments/Slate/808.slt"
 esptool --chip esp32s3 --port <port> write-flash 0x210000 content.bin
 ```
+
+Slate kits (`.slt`) become presets of the Drums pad, one pad sound per key from C3, and come first
+on that pad. A preset that plays samples goes in with `--samples <preset.obs>`, or `--thin
+<preset.obs>` to keep every other key zone and save about half its size.
 
 `content2bin.py` lists every preset it leaves out and why. Each preset is translated by [`obs2preset.py`](firmware/tools/obs2preset.py), which also prints what it could not represent: run it on a single `.obs` file to see the generated patch and its gaps.
 

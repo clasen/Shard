@@ -1,6 +1,7 @@
-// render <content.bin> <preset name> <out.raw> [fx]: plays the reference sequence (seq.h; kFxSeq with "fx") through the port's
-// engine on the host and writes the mono pre-volume mix (renderVoices + multiFx + plate) as 48 kHz float32,
-// the same point cmpref compares against an NS2 recording. Build with build.sh.
+// render <content.bin> <preset name> <out.raw> [fx] [stereo]: plays the reference sequence (seq.h; kFxSeq with "fx")
+// through the port's engine on the host and writes the mono pre-volume mix (renderVoices + multiFx + plate) as 48 kHz
+// float32, the same point cmpref compares against an NS2 recording; "stereo" writes L/R interleaved instead.
+// Build with build.sh.
 #include "synth.h"
 #include "content.h"
 #include <stdlib.h>
@@ -30,7 +31,7 @@ static bool loadImage(const char* path, std::vector<uint8_t>& img) {
 }
 
 int main(int argc, char** argv) {
-  if (argc < 4) { fprintf(stderr, "usage: render <content.bin> <preset name> <out.raw> [fx]\n"); return 2; }
+  if (argc < 4) { fprintf(stderr, "usage: render <content.bin> <preset name> <out.raw> [fx] [stereo]\n"); return 2; }
   gBank = new WaveBank();
   gBank->build();
   static std::vector<uint8_t> img;
@@ -45,7 +46,11 @@ int main(int argc, char** argv) {
   e->setPatch(p);
   std::vector<float> out;
   float L[kBlock], R[kBlock], wl[kBlock], wr[kBlock], rin[kBlock];
-  const bool fx = argc > 4 && !strcmp(argv[4], "fx");
+  bool fx = false, stereo = false;
+  for (int i = 4; i < argc; i++) {
+    fx |= !strcmp(argv[i], "fx");
+    stereo |= !strcmp(argv[i], "stereo");
+  }
   const RefEvent* seq = fx ? kFxSeq : kRefSeq;
   const size_t count = fx ? kFxSeqCount : kRefSeqCount;
   const int blocks = (int)(22.0f * kSampleRate / kBlock);
@@ -62,7 +67,11 @@ int main(int argc, char** argv) {
     const float wet = e->reverbReady() ? e->reverbMix() : 0.0f, dry = fminf(1.0f, 2.0f * (1.0f - wet));
     if (wet > 0.0f) e->reverb(rin, wl, wr);
     else for (int n = 0; n < kBlock; n++) wl[n] = wr[n] = 0.0f;
-    for (int n = 0; n < kBlock; n++) out.push_back(0.5f * ((L[n] + R[n]) * dry + (wl[n] + wr[n]) * wet));
+    for (int n = 0; n < kBlock; n++) {
+      const float l = L[n] * dry + wl[n] * wet, r = R[n] * dry + wr[n] * wet;
+      if (stereo) { out.push_back(l); out.push_back(r); }
+      else out.push_back(0.5f * (l + r));
+    }
   }
   FILE* o = fopen(argv[3], "wb");
   fwrite(out.data(), 4, out.size(), o);

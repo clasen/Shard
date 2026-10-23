@@ -273,8 +273,9 @@ self-feedback, so it can be computed in a single pass.
   `e = Levl + (1 − Levl) · envelope`. With that, FM Stoned Keys, House Pluck Bass, Hang Drum and
   Ef Em Crystal Keys match NS2 in level, envelope and harmonics. The outputs `O1O..O3O` with
   intermediate amounts (0.25, 0.5, two carriers at once) and Saw Up/Saw Down operators as
-  carriers match NS2 **[P]**. Feedback on a Saw Down operator (`O11` 0.5) leaves the output 5 dB
-  lower in NS2 with the same spectrum; in the port the level does not change **[?]**.
+  carriers match NS2 **[P]**. Feedback on a Saw Down operator (`O11` 0.5) matches NS2 harmonic by
+  harmonic; the level difference measured earlier was its DC offset, which NS2 removes
+  ([04](04-filters.md#very-low-cutoff-and-dc-blocking-p)) **[P]**.
   Tests with `O3O` at decay 0.6 s and sustain 0 confirm the formula with `Levl` 0.5 and 1 (exact
   match) **[P]**. With `Levl` 0, NS2 decays the same way up to 100 ms, but then a −35 to −40 dB
   tail remains that the port brings down to −56. It may be the ±6-units-per-block limiter or

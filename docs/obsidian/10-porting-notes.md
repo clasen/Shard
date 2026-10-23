@@ -221,8 +221,8 @@ in both USB modes the board acts as a BLE central (the core's `BLE` library, Blu
     Korg's knobs control the same things in every preset (cut, res, atk, rel, fdec, det, rev,
     vol) and do not move the macros. They used to move the preset's macro if it used one. That
     way, in the Rhodes knob 1 was Amp Attack and not the filter.
-  - The volume knob has an audio taper (`volume = x²`). With the limiter linear up to 0.5, a
-    linear scale hit the ceiling in the first third of the travel.
+  - The volume knob has an audio taper (`volume = x²`). With the soft clip then linear up to
+    0.5, a linear scale hit the ceiling in the first third of the travel.
   - My own presets (0..6) start with a `Pitch Wheel → Osc All Pitch Coarse` slot of ±2
     semitones. Bend is no longer a special case in the engine.
 - **Full LFOs** (`cLFOSimple`, [05](05-envelopes-lfos.md#lfos-clfosimple)):
@@ -315,6 +315,13 @@ in both USB modes the board acts as a BLE central (the core's `BLE` library, Blu
   - The output limiter was `x/(1 + |x|)`, which compresses and distorts from low levels (at 0.2
     it already takes off 17 %). Now it is linear up to `kClipKnee` (0.5) and curves gently
     towards full scale above that.
+  - That soft clip still distorted loud chords: two velocity-127 notes of a bass reached ~1.4
+    and clicked on their attacks. A stereo-linked peak limiter now runs before it, with one
+    block of lookahead (the output is 1.3 ms late), a −1 dBFS ceiling and an ~80 ms release;
+    the soft clip's knee went up to 0.9 and only catches what the limiter lets through. On the
+    board, loud two-note basses and kit hits peak at −1 dBFS.
+  - The reverb knob (CC91 and the Korg's) reaches Mix 0.5: NS2's law fades the dry out above
+    that, and at the top only the tail was left.
 - At startup, `kBootPreset` (RhodesMK2Raw) is loaded if the content image has it.
 - **Bipolar Pitch Env** (fixed, 2026-10-20): from the general matrix, the Bipolar envelope rose
   to 1 and stayed at `S`. The 352 presets with the default setup played an octave up. Now it
@@ -530,7 +537,11 @@ NS2 2.1.2 runs on the Mac (Apple Silicon). Each measurement follows these steps:
    in NS2's container, and loaded after Manage → Refresh. NS2 only reacts to slow taps (press,
    move, release).
 4. **Comparison**: the NS2 take against the port's host render, before the volume and the
-   limiter, aligned by envelope correlation. Per note, level, envelope, octave bands in the
+   limiter, aligned by envelope correlation. A mono take (`arec` without a channel count) is
+   NS2's **left channel** only, not the mix of both (a simultaneous stereo take matches it with
+   gain 0.998); `arec <dev> <s> <out> 2` and `render ... stereo` record and render L/R, which
+   the reverb's width needs. On this Mac NS2's output is ~3 dB louder on the left than on the
+   right, also for a centred oscillator (the project's mixer, not Obsidian) **[P]**. Per note, level, envelope, octave bands in the
    sustain and tuning are measured.
 
 Findings fixed with this:
@@ -567,8 +578,33 @@ Findings fixed with this:
 - Unison pan with constant sum, as in NS2 ([02](02-preset-format.md#unison-b)). Three-level
   Bi-Pulse, and `Osc N Phase` as a matrix destination (it shifts the oscillator's phase; with
   `Rand` each note starts at a different phase) **[I]**.
-- Open: Fat Wide Pad (3 FM oscillators with feedback) comes out ~13 dB louder than NS2, although
-  a single oscillator matches; Africa Brass and other presets with unison 2 and high `USte` are
+- A 5 Hz DC blocker on the voice mix ([04](04-filters.md#very-low-cutoff-and-dc-blocking-p)):
+  FM Saw Down operators with feedback left an offset of up to −1.1 in a 4-note chord. Fat Wide
+  Pad went from 13.7 dB too loud to within 1.2 dB of the reference gain, Magic Pitch from 4 dB to
+  0.4 dB, Ef Em Crystal Keys and 1984 also closer; the unit tests did not move.
+- Reverb width: stereo NS2 renders showed the port's wet signal fully decorrelated (and
+  anti-correlated in the rooms) where NS2's is mono for the `* 1` types and `Widt` wide for the
+  others. The decompiled mid/side output mix fixed it; it changes the stereo image of the 130
+  factory presets with reverb and leaves the mono mix as it was ([07](07-effects.md)).
+- Pad 5 (Brass/Strings) against stereo NS2 takes: F1/F2 comb filters, and the envelope's
+  key/velocity time factor, which NS2 applies as a speed ([05](05-envelopes-lfos.md)). On the
+  board these presets use 52–88 % of core 1 with four notes and drop voices (Orchestra On Mars,
+  Super Strings); a dropped voice now fades out over one block instead of being cut. Still loud
+  against NS2: Strings of Infinity and Orchestra On Mars ~+6 dB, Pitched Strings +3 dB; the
+  oscillator `Pan` (Pitched and Artificial Strings) is not implemented.
+- Slate kits (NS2's sample drum machine): `content2bin.py` turns a `.slt` into a kit of 32 pads
+  (MIDI notes from the kit's map, C3 up) and a Drums preset that points at it; the engine plays
+  them as one-shot hits with up to 3 layered samples, a filter (LP 6/12, HP 6/12, BP), the
+  A/H/D/break/D2 envelope, pitch, pan and the group polyphony that chokes open hi-hats. Read from
+  the kit files and the manual, not measured against NS2 **[I]**: levels linear, velocity opening
+  the filter by `Vel` (the 808 kit's LP 6 at `CutO` 0.19 with `Vel` 1), straight-line envelope
+  segments. Not played: `.mwav` multisamples, FX buses (compressor/EQ), waveshaper, pitch and
+  filter envelopes, the kit's reverb/delay sends and the Sustain trigger modes. A pad hit costs
+  little CPU (five kits at 2–5 % of core 1).
+- Level reference: NS2's output level in these takes drifts between sessions (the saw test
+  `zz01` came out at −22.6 dB against the port, not −5.6). Record a reference patch in the same
+  session and compare against it, not against a fixed gain.
+- Open: Africa Brass and other presets with unison 2 and high `USte` are
   2–4 dB loud with the constant-sum law, which the direct test confirms.
 
 With that, the 17 single-module test patches match NS2 in level (±0.3 dB between tests), tuning
@@ -592,8 +628,8 @@ Status of the 37 recorded factory presets (after the fixes above):
 - Matching (envelope and spectrum ≤ 3 dB, level ±2 dB): Deep Bass, Bottle Bass, FM Stoned Keys,
   Rave Lead, Bold as Brass, Africa Brass, Percussive Bass, Hardstyle Lead, Hang Drum, Hard
   Glider, Snare 4, NanoSaw 80s, Analogue Kick and Classic Acid (except the spectrum).
-- Right shape, different level: the port comes out 3–9 dB louder on Fat Wide Pad, Iron Drops,
-  Ocean of Secrets, Electric Piano 2, Slow Sweep Pad and Magic Pitch, and 5–9 dB lower on Pluck
+- Right shape, different level: the port comes out 3–9 dB louder on Iron Drops,
+  Ocean of Secrets, Electric Piano 2 and Slow Sweep Pad, and 5–9 dB lower on Pluck
   or Pad, Dubstep Crush, 7th House and Dirty Saws.
 - With FX or modulations the port lacks: PsyDelay (Env 4 → Delay Time/FB), Arping On (the
   Random Loop pattern), Dead Space and Liquid Resonance.

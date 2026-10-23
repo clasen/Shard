@@ -43,6 +43,11 @@ static volatile bool gDemo = true;
 static volatile bool gMonitor = false;
 static volatile uint32_t gVoiceCycles = 0, gReverbCycles = 0, gShed = 0;
 static volatile int gPeak = 0;  // largest output sample since the last "stat"
+static volatile uint32_t gMaxBusy = 0;  // longest audio-task block before its I2S write, in cycles
+// "cap": the next second of output, 16-bit stereo, kept in PSRAM until "capdump" sends it.
+static constexpr int kCapBlocks = (int)(syn::kSampleRate / syn::kBlock);
+static int16_t* gCap = nullptr;
+static volatile int gCapBlocks = -1;
 // When the voices' load, averaged over the last ~16 blocks, passes this share of the block period,
 // the oldest voice is dropped; single heavy blocks (note-ons) do not count.
 static constexpr float kShedLoad = 0.9f;
@@ -134,6 +139,12 @@ static void audioTask(void*) {
     xSemaphoreGive(gRevStart);
 
     gEngine->mixOut(dryL, dryR, wetL, wetR, out);
+    const uint32_t busy = esp_cpu_get_cycle_count() - t0;
+    if (busy > gMaxBusy) gMaxBusy = busy;
+    if (gCapBlocks >= 0 && gCapBlocks < kCapBlocks) {
+      memcpy(gCap + gCapBlocks * syn::kBlock * 2, out, sizeof(out));
+      gCapBlocks = gCapBlocks + 1;
+    }
     int peak = gPeak;
     for (int n = 0; n < syn::kBlock * 2; n++) peak = abs(out[n]) > peak ? abs(out[n]) : peak;
     gPeak = peak;
@@ -163,7 +174,7 @@ static void setParam(int id, float x) {
     case kCut: p.cutoff = x; break;
     case kRes: p.resonance = x; break;
     case kEnvAmt: p.filterEnvAmt = x; break;
-    case kRev: p.reverbMix = x; break;
+    case kRev: p.reverbMix = 0.5f * x; break;  // up to Mix 0.5: the dry stays at full level (NS2 fades it above)
     case kVol: p.volume = x * x; break;  // audio taper
     case kGlide: p.glide = 2.0f * x * x; break;
     case kAtk: p.ampEnv.attack = 0.001f + 5.0f * x * x * x; break;
@@ -420,7 +431,8 @@ static void printHelp() {
       "  learn <param>    next CC moved is assigned to <param> (saved in flash)\n"
       "  map | unmap <cc> list or remove CC assignments\n"
       "  mon 0|1          print incoming MIDI messages (USB and Bluetooth)\n"
-      "  stat             CPU load per core and output peak since the last stat");
+      "  stat             CPU load per core, longest block and output peak since the last stat\n"
+      "  cap | capdump    record the next second of output | send it (\"CAP <bytes>\" then 16-bit stereo)");
 }
 
 static void handleLine(char* line) {
@@ -459,11 +471,24 @@ static void handleLine(char* line) {
   }
   if (!strcmp(cmd, "stat")) {
     float budget = 240e6f / syn::kSampleRate * syn::kBlock;
-    Serial.printf("voices active %d (%u shed) | core 1 voices %.1f%% | core 0 reverb %.1f%% | peak %.1f dBFS | BLE %s, %u packets\n",
+    Serial.printf("voices active %d (%u shed) | core 1 voices %.1f%% | core 0 reverb %.1f%% | longest block %.0f%% | peak %.1f dBFS | BLE %s, %u packets\n",
                   gEngine->activeVoices(), (unsigned)gShed, 100.0f * gVoiceCycles / budget, 100.0f * gReverbCycles / budget,
+                  100.0f * gMaxBusy / budget,
                   20.0f * log10f((gPeak + 1) / 32768.0f), blemidi::gState.connected ? "connected" : "scanning",
                   (unsigned)blemidi::gState.packets);
     gPeak = 0;
+    gMaxBusy = 0;
+  } else if (!strcmp(cmd, "cap")) {
+    if (!gCap) gCap = (int16_t*)heap_caps_malloc(kCapBlocks * syn::kBlock * 4, MALLOC_CAP_SPIRAM);
+    if (gCap) gCapBlocks = 0;
+    Serial.println(gCap ? "capturing 1 s" : "out of PSRAM");
+  } else if (!strcmp(cmd, "capdump")) {
+    if (gCapBlocks < kCapBlocks) {
+      Serial.println("no complete capture");
+    } else {
+      Serial.printf("CAP %u\n", (unsigned)(kCapBlocks * syn::kBlock * 4));
+      Serial.write((const uint8_t*)gCap, kCapBlocks * syn::kBlock * 4);
+    }
   } else if (!strcmp(cmd, "help")) {
     printHelp();
   }

@@ -347,6 +347,9 @@ per sample:
 - `D`, `dry`, `wet` and `fb` are linearly interpolated across the block. For the delay it
   crossfades between the read with the previous `D` and the new one.
 - With `Q = 0` it is a feedforward-only comb: `0.7·in ∓ 0.7·in[n−D]` with `CMix = 1`.
+- The port runs it in F3 and, per voice, in F1/F2 with the voice's keytracked cutoff. Physical
+  String (a noise burst into a `Comb Pos` F1 with `Q` 1, a Karplus-Strong string) used to fall
+  back to a self-oscillating LP 24-A; with the comb it matches NS2's spectrum **[P]**.
 
 ## Own modulation
 
@@ -365,8 +368,11 @@ attack thump goes through the filter, and that thump depends on the saw's start 
 ([03](03-oscillators.md)). A difference remains in that thump. NS2's chain has a **~5 Hz** DC
 blocker (a one-pole high-pass): NS2's open saw run offline through a 4-pole LP at 39 Hz
 reproduces its CutO 0.1 render exactly, while the port's saw only matches if that high-pass is
-added. It is not known whether it sits in the voice or at the output, and the port does not have
-it: it only shows in the attack of almost-closed filters.
+added. FM confirms it: a Saw Down operator with feedback (`O11` 0.5) has a large mean (−0.33
+per voice in the port), and NS2 comes out centred, with the offset decaying at τ = 32 ms after
+the note-on, that is a one-pole high-pass at 5 Hz. NS2's output carries no DC in any of the
+test patches. It is not known whether it sits in the voice or at the output **[?]**; the port
+applies it to the voice mix, after F3 and before the effects.
 
 ## Routing
 
