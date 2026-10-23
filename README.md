@@ -62,7 +62,7 @@ The PCM5102 module doesn't work out of the box: on the back, bridge pads 2 and 3
 
 - 10 voices at 48 kHz, 16-bit stereo. Each voice has 3 oscillators, 2 filters, 5 envelopes, 5 LFOs and the modulation matrix. Voices render on one core and the reverb on the other.
 - Presets are loaded from a content image in flash that you build from your own NanoStudio 2 installation: with the factory presets plus some of your own, mine holds 448 presets, 23 wavetables and 57 samples (13.8 MB).
-- MIDI over USB and Bluetooth LE: notes, pitch bend, sustain, Program Change and CCs you can assign with MIDI learn. A Korg nanoKEY Studio is mapped out of the box: the 8 pads pick preset categories, and the 8 knobs control cutoff, resonance, attack, release, LFO rate, LFO amount, reverb and volume.
+- MIDI over USB and Bluetooth LE: notes, pitch bend, sustain, Program Change, MIDI clock (the tempo of tempo-synced LFOs and delays) and CCs you can assign with MIDI learn. A Korg nanoKEY Studio is mapped out of the box: the 8 pads pick preset categories, and the 8 knobs control cutoff, resonance, attack, release, LFO rate, LFO amount, reverb and volume.
 - A serial console at 115200 baud for playing notes, choosing presets (`list`, `find`, `preset`), setting parameters, assigning CCs (`learn`) and reading the CPU load (`stat`). Type `help` for the full list.
 
 ### Building and flashing

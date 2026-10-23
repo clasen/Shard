@@ -604,6 +604,11 @@ Findings fixed with this:
   within 2 dB. Not played: `.mwav` multisamples, bus and main EQ/compressor, delay sends (`S2`),
   waveshaper, pitch and filter envelopes and the Sustain trigger modes. A pad hit costs little
   CPU (2–5 % of core 1).
+- Tempo: tempo-synced LFO rates and delay times are kept in beats (`RtBt/BRt`, `TNum/TDen` of a
+  bar) and played at the engine's tempo, which MIDI clock sets (24 ticks per quarter note,
+  averaged over a beat) or the `bpm` command; 120 until then. They used to be converted at a
+  fixed 120 BPM. Drum Sequence 1, recorded in NS2 at 125 BPM, went from 9.6 to 4.5 dB of
+  envelope difference rendered at its tempo (`render ... bpm=125`).
 - Level reference: NS2's output level in these takes drifts between sessions (the saw test
   `zz01` came out at −22.6 dB against the port, not −5.6). Record a reference patch in the same
   session and compare against it, not against a fixed gain.

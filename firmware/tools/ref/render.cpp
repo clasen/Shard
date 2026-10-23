@@ -1,4 +1,4 @@
-// render <content.bin> <preset name> <out.raw> [fx] [stereo]: plays the reference sequence (seq.h; kFxSeq with "fx")
+// render <content.bin> <preset name> <out.raw> [fx] [stereo] [bpm=<n>]: plays the reference sequence (seq.h; kFxSeq with "fx")
 // through the port's engine on the host and writes the mono pre-volume mix (renderVoices + multiFx + plate) as 48 kHz
 // float32, the same point cmpref compares against an NS2 recording; "stereo" writes L/R interleaved instead.
 // Build with build.sh.
@@ -31,7 +31,7 @@ static bool loadImage(const char* path, std::vector<uint8_t>& img) {
 }
 
 int main(int argc, char** argv) {
-  if (argc < 4) { fprintf(stderr, "usage: render <content.bin> <preset name> <out.raw> [fx] [stereo]\n"); return 2; }
+  if (argc < 4) { fprintf(stderr, "usage: render <content.bin> <preset name> <out.raw> [fx] [stereo] [bpm=<n>]\n"); return 2; }
   gBank = new WaveBank();
   gBank->build();
   static std::vector<uint8_t> img;
@@ -50,6 +50,7 @@ int main(int argc, char** argv) {
   for (int i = 4; i < argc; i++) {
     fx |= !strcmp(argv[i], "fx");
     stereo |= !strcmp(argv[i], "stereo");
+    if (!strncmp(argv[i], "bpm=", 4)) gBpm = (float)atof(argv[i] + 4);
   }
   const RefEvent* seq = fx ? kFxSeq : kRefSeq;
   const size_t count = fx ? kFxSeqCount : kRefSeqCount;

@@ -97,7 +97,6 @@ LFO_TYPES = {"Sine": "kLfoSine", "Square": "kLfoSquare", "Triangle": "kLfoTriang
              "Random Loop": "kLfoRandomLoop"}
 LFO_OUTS = {"BIPOLAR": "kLfoBipolar", "UNI HALF": "kLfoUniHalf", "UNI FULL": "kLfoUniFull"}
 LFO_SYNCS = {"OFF": "kLfoFree", "KEY": "kLfoKey", "GLOBAL": "kLfoGlobal"}
-TEMPO_BPM = 120.0  # the engine has no transport: tempo-synced LFO rates assume this tempo
 
 # Envelopes in matrix order: (XML tag, Patch field).
 ENVS = [("EnvA", "ampEnv"), ("EnvF", "filtEnv"), ("EnvP", "pitchEnv"), ("Env4", "env4"), ("Env5", "env5")]
@@ -414,14 +413,13 @@ class Converter:
         t = l.get("Type")
         if t not in LFO_TYPES:
             self.unsupported(where, f"Type={t} not supported, played as Sine")
-        rate = num(l.get("Rt"))
-        if l.get("BRt") != "Hz":
-            rate = float(l.get("BRt")) / (num(l.get("RtBt")) * 4 * 60.0 / TEMPO_BPM)
-            self.unsupported(where, f"tempo rate {l.get('RtBt')}/{l.get('BRt')} played at {TEMPO_BPM:g} BPM")
+        # A tempo rate is a fraction of a bar (RtBt/BRt), kept in beats for the engine's tempo.
+        beats = 4 * num(l.get("RtBt")) / float(l.get("BRt")) if l.get("BRt") != "Hz" else 0.0
         sync = l.get("Sync", "OFF").upper()
         if sync not in LFO_SYNCS:
             self.unsupported(where, f"Sync={sync} not supported, free")
-        self.emit(f"{q}.rate = {f(rate)}; {q}.ampl = {f(num(l.get('Ampl')))}; {q}.type = {LFO_TYPES.get(t, 'kLfoSine')}; "
+        self.emit((f"{q}.beats = {f(beats)}; " if beats else f"{q}.rate = {f(num(l.get('Rt')))}; ")
+                  + f"{q}.ampl = {f(num(l.get('Ampl')))}; {q}.type = {LFO_TYPES.get(t, 'kLfoSine')}; "
                   f"{q}.out = {LFO_OUTS.get(l.get('OutT'), 'kLfoBipolar')}; {q}.sync = {LFO_SYNCS.get(sync, 'kLfoFree')};")
         self.emit(f"{q}.phaseOffset = {f(num(l.get('PhOf')))}; {q}.attack = {f(num(l.get('Atk')))}; "
                   f"{q}.curve = {f(num(l.get('Crv')))}; {q}.warp = {f(num(l.get('Warp')))}; "
@@ -529,12 +527,9 @@ class Converter:
                 self.emit(f"p.chorus.feedback = {f(num(mfx.get('FB')))}; p.chorus.mix = {f(num(mfx.get('Mix')))};")
         if self.delay_on:
             kind, _, ratio = dly.get("Type").partition(" 1:")
-            seconds = num(dly.get("DTim"))
-            if dly.get("TDen") != "sec":
-                seconds = num(dly.get("TNum")) / float(dly.get("TDen")) * 4 * 60.0 / TEMPO_BPM
-                self.unsupported("Dly", f"tempo time {dly.get('TNum')}/{dly.get('TDen')} played at {TEMPO_BPM:g} BPM")
-            self.emit(f"p.delay.enabled = true; p.delay.type = kDelay{kind}; p.delay.ratio = {int(ratio or 1)}; "
-                      f"p.delay.time = {f(seconds)};")
+            time = (f"p.delay.beats = {f(4 * num(dly.get('TNum')) / float(dly.get('TDen')))};"
+                    if dly.get("TDen") != "sec" else f"p.delay.time = {f(num(dly.get('DTim')))};")
+            self.emit(f"p.delay.enabled = true; p.delay.type = kDelay{kind}; p.delay.ratio = {int(ratio or 1)}; {time}")
             self.emit(f"p.delay.feedback = {f(num(dly.get('FB')))}; p.delay.eq = {f(num(dly.get('EQCt')))}; "
                       f"p.delay.mix = {f(num(dly.get('Mix')))};")
         mix = num(rev.get("Mix")) if on and rev.get("En") == "1" else 0.0

@@ -373,8 +373,24 @@ static void loadCcMap() {
 
 static void saveCcMap() { gPrefs.putBytes("ccmap", gCcMap, sizeof(gCcMap)); }
 
+// MIDI clock (24 ticks per quarter note) sets the tempo of the tempo-synced LFOs and delays: the
+// average of the last 24 tick intervals, ignoring gaps (a stopped clock keeps the last tempo).
+static void clockTick() {
+  static uint32_t last = 0, sum = 0;
+  static int count = 0;
+  const uint32_t now = micros(), dt = now - last;
+  last = now;
+  if (dt < 5000 || dt > 125000) { sum = 0; count = 0; return; }  // outside 20..500 BPM
+  sum += dt;
+  if (++count < 24) return;
+  syn::gBpm = 60e6f / (float)sum;
+  sum = 0;
+  count = 0;
+}
+
 // MIDI messages are applied under the same lock the audio task uses for the demo sequencer.
 static void handleMidi(uint8_t b0, uint8_t b1, uint8_t b2) {
+  if (b0 == 0xf8) { clockTick(); return; }
   uint8_t status = b0 & 0xf0;
   uint8_t d1 = b1, d2 = b2;
   if (gMonitor && b0 < 0xf0) Serial.printf("midi ch%d %02x %d %d\n", (b0 & 0x0f) + 1, status, d1, d2);
@@ -432,6 +448,7 @@ static void printHelp() {
       "  map | unmap <cc> list or remove CC assignments\n"
       "  mon 0|1          print incoming MIDI messages (USB and Bluetooth)\n"
       "  stat             CPU load per core, longest block and output peak since the last stat\n"
+      "  bpm <n>          tempo of the tempo-synced LFOs and delays (MIDI clock sets it too)\n"
       "  cap | capdump    record the next second of output | send it (\"CAP <bytes>\" then 16-bit stereo)");
 }
 
@@ -448,6 +465,7 @@ static void handleLine(char* line) {
   else if (!strcmp(cmd, "demo") && a) gDemo = atoi(a) != 0;
   else if (!strcmp(cmd, "mon") && a) gMonitor = atoi(a) != 0;
   else if (!strcmp(cmd, "preset") && a) loadPreset(constrain(atoi(a), 0, presetCount() - 1));
+  else if (!strcmp(cmd, "bpm") && a) syn::gBpm = constrain((float)atof(a), 20.0f, 300.0f);
   else if (!strcmp(cmd, "wave") && a && b) p.osc[constrain(atoi(a), 0, 2)].wave = (syn::Wave)constrain(atoi(b), 0, 3);
   else if (paramByName(cmd) >= 0 && a) setParam(paramByName(cmd), fa);
   portEXIT_CRITICAL(&gLock);

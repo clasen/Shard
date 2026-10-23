@@ -86,6 +86,8 @@ constexpr float kPitchCoarseRange = 100.0f, kPitchFineRange = 1.0f;
 // Master trim before the soft clip (+2 dB): keeps the loudness the board had before the amp envelope was
 // squared like NS2's, which made the mix about 5 dB quieter [I].
 constexpr float kOutputTrim = 1.26f;
+// Tempo of the tempo-synced LFO rates and delay times: MIDI clock or the "bpm" command.
+inline float gBpm = 120.0f;
 constexpr float kClipKnee = 0.9f;  // the output soft clip is linear below this level; the limiter keeps under it
 
 // ---------------------------------------------------------------------------
@@ -314,6 +316,7 @@ static EnvScale envScale(const EnvPatch& p, int note, float vel) {
 
 struct LfoPatch {
   float rate = 4.0f;  // Rt, Hz
+  float beats = 0.0f;  // a tempo rate's period in beats (RtBt/BRt of a bar), 0 = Rt in Hz
   float ampl = 0.0f;  // Ampl, 0..1
   LfoType type = kLfoSine;
   LfoOut out = kLfoBipolar;  // OutT
@@ -357,7 +360,8 @@ struct DelayPatch {
   bool enabled = false;
   DelayType type = kDelayStereo;
   int ratio = 1;      // 1:N
-  float time = 0.25f; // seconds of the left line (tempo times are converted at 120 BPM)
+  float time = 0.25f; // seconds of the left line
+  float beats = 0.0f; // a tempo time in beats (TNum/TDen of a bar), 0 = time in seconds
   float feedback = 0.3f, eq = 0.5f, mix = 0.0f;  // FB, EQCt (0.5 = flat), Mix
 };
 
@@ -517,7 +521,7 @@ template <class F> void forEachField(Patch& p, F&& f) {
   env(p.ampEnv, "ampEnv"); env(p.filtEnv, "filtEnv"); env(p.pitchEnv, "pitchEnv"); env(p.env4, "env4"); env(p.env5, "env5");
   for (int i = 0; i < kLfos; i++) {
     LfoPatch& l = p.lfo[i];
-    at(l.rate, "lfo[%d].rate", i); at(l.ampl, "lfo[%d].ampl", i); at(l.type, "lfo[%d].type", i);
+    at(l.rate, "lfo[%d].rate", i); at(l.beats, "lfo[%d].beats", i); at(l.ampl, "lfo[%d].ampl", i); at(l.type, "lfo[%d].type", i);
     at(l.out, "lfo[%d].out", i); at(l.sync, "lfo[%d].sync", i); at(l.phaseOffset, "lfo[%d].phaseOffset", i);
     at(l.attack, "lfo[%d].attack", i); at(l.curve, "lfo[%d].curve", i); at(l.warp, "lfo[%d].warp", i);
     at(l.quantize, "lfo[%d].quantize", i); at(l.loopPattern, "lfo[%d].loopPattern", i);
@@ -547,7 +551,7 @@ template <class F> void forEachField(Patch& p, F&& f) {
   at(p.chorus.depth, "chorus.depth"); at(p.chorus.delay, "chorus.delay"); at(p.chorus.feedback, "chorus.feedback");
   at(p.chorus.mix, "chorus.mix");
   at(p.delay.enabled, "delay.enabled"); at(p.delay.type, "delay.type"); at(p.delay.ratio, "delay.ratio");
-  at(p.delay.time, "delay.time"); at(p.delay.feedback, "delay.feedback"); at(p.delay.eq, "delay.eq");
+  at(p.delay.time, "delay.time"); at(p.delay.beats, "delay.beats"); at(p.delay.feedback, "delay.feedback"); at(p.delay.eq, "delay.eq");
   at(p.delay.mix, "delay.mix");
 }
 
@@ -1130,7 +1134,7 @@ struct Lfo {
     float amp = p.ampl + levelMod;
     amp = amp < 0.0f ? 0.0f : (amp > 1.0f ? 1.0f : amp);
     if (p.attack > 0.0f && time < p.attack) amp *= time / p.attack;
-    float rate = p.rate + 60.0f * rateMod * rateMod * rateMod;
+    float rate = (p.beats > 0.0f ? gBpm / (60.0f * p.beats) : p.rate) + 60.0f * rateMod * rateMod * rateMod;
     rate = rate < 0.0f ? 0.0f : (rate > 60.0f ? 60.0f : rate);
     phase += rate * dt;
     time += dt;
@@ -1964,7 +1968,8 @@ struct Delay {
   void process(const DelayPatch& p, float mixMod, float* xl, float* xr) {
     const int maxD = l.len - 1;
     const bool cross = p.type != kDelayStereo;
-    int dl = (int)(p.time * kSampleRate), dr = cross ? dl / (p.ratio < 1 ? 1 : p.ratio) : dl;
+    const float seconds = p.beats > 0.0f ? p.beats * 60.0f / gBpm : p.time;
+    int dl = (int)(seconds * kSampleRate), dr = cross ? dl / (p.ratio < 1 ? 1 : p.ratio) : dl;
     dl = dl < 1 ? 1 : (dl > maxD ? maxD : dl);
     dr = dr < 1 ? 1 : (dr > maxD ? maxD : dr);
     // Delay Mix from the matrix adds to the wet level itself, not to Mix: 0 + 0.5 echoes at -6 dB [P].
