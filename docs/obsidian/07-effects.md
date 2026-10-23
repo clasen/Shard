@@ -223,12 +223,12 @@ And "Hall" is Plate with a long pre-delay (see the preset table above).
   [11] Dry [12] Wet [13] Widt`.
 - **Pre-delay**: `PDel·sr` samples. `PDMx` crossfades between the direct and the pre-delayed
   signal before it enters the reverb: `in + PDMx·(delayed − in)`.
-- **Filters**, with counter-intuitive names:
-  - `HCut` controls a **high-pass** at `20 + 12000·HCut³` Hz (0.2 → 116 Hz).
-  - `LCut` controls a **low-pass** at `200 + 21000·(1 − LCut)³` Hz (0.453 → 3.6 kHz).
-
-  Probably "HCut" means "cut of the lows" and "LCut" "cut of the highs", against convention, or
-  the internal names are swapped relative to the UI's **[I]**.
+- **Filters**: the slot at `+0x1c` is a **high-pass** at `20 + 12000·x³` Hz and the one at `+0x20`
+  a **low-pass** at `200 + 21000·(1 − x)³` Hz **[B]**. `LCut` drives the high-pass (it cuts the
+  lows) and `HCut` the low-pass **[P]**: Drum Sequence 1's reverb (`LCut` 1, `HCut` 0.06) comes out
+  of NS2 ~20 dB below a wet signal through a 200 Hz low-pass and with its lows 30–43 dB down, and
+  with `LCut` 0, `HCut` 1 it is dark. The struct slots are not in XML order (see the output mix
+  below), and tests with `LCut` = `HCut` cannot tell the two apart.
 - `Decy` and `HDmp` reach the engines as size/decay and damping.
 - `Wet` and `Widt` enter squared when modulated; the stereo output is a mid/side mix driven by
   `Widt`.
@@ -261,8 +261,8 @@ And "Hall" is Plate with a long pre-delay (see the preset table above).
   `Decy` 0.1 are barely audible.
 - `HDmp` 0.8 lowers the tail by 7 to 14 dB above 1 kHz (Plate) and by up to 34 dB at 8 kHz
   (Small Room).
-- `LCut` and `HCut` at 0.8 leave the wet signal 26 dB lower: this confirms a low-pass and a
-  high-pass with the cutoffs above.
+- `LCut` and `HCut` at 0.8 leave the wet signal 26 dB lower: a high-pass and a low-pass with the
+  cutoffs above.
 - The Hall is the Plate with pre-delay; Plate 2 and Room 2 barely differ from their version 1.
 
 **In the port**: the plate's 4 tank allpasses swing by NS2's 0.272 ms at ~1 Hz (rates and which
@@ -275,7 +275,7 @@ Room use Freeverb (8 combs and 4 allpasses per channel, with the plate's 4 diffu
 input; without them, the early echoes came out 6 dB louder than in NS2). `obs2preset.py` maps
 `Decy` to each engine's feedback and sets the wet gain per type (tables `REVERB_DECAY` and
 `REVERB_GAIN` at three `Decy` points, fitted against the renders), `HDmp` to the damping,
-`HCut`/`LCut` to one-pole filters and the pre-delay from the preset table. The tests are within
+`LCut`/`HCut` to a one-pole high-pass/low-pass (NS2's are steeper) and the pre-delay from the preset table. The tests are within
 ±2 dB of wet level and ±3 dB/s of decay. Still open: in the first 120–400 ms after a note the
 plate's wet signal is ~4 dB above NS2's (an energy bump at 180–240 ms, where the first pass of
 the output taps arrives), and Dense Room 1 at `Decy` 0.5 falls in two slopes in NS2 (fast for

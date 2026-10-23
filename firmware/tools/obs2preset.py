@@ -69,8 +69,8 @@ def reverb_fields(rev):
     decy, hdmp = num(rev.get("Decy")), num(rev.get("HDmp"))
     d0, d1 = REVERB_DAMP[kind]
     damp = min(max(d0 + (d1 - d0) * (hdmp - 0.25) / 0.55, 0.0), 0.95)
-    hp = 20 + 12000 * num(rev.get("HCut")) ** 3       # HCut is a high-pass, LCut a low-pass (07-effects.md)
-    lp = 200 + 21000 * (1 - num(rev.get("LCut"))) ** 3
+    hp = 20 + 12000 * num(rev.get("LCut")) ** 3       # LCut cuts the lows, HCut the highs (07-effects.md)
+    lp = 200 + 21000 * (1 - num(rev.get("HCut"))) ** 3
     return (f"p.reverbDecay = {f(interp3(REVERB_DECAY[kind], decy))}; p.reverbRoom = {'true' if kind in ('small', 'large') else 'false'}; "
             f"p.reverbDamp = {f(damp)}; p.reverbGain = {f(interp3(REVERB_GAIN[kind], decy))};\n"
             f"p.reverbHpHz = {f(hp)}; p.reverbLpHz = {f(lp)}; p.reverbPre = {f(pre)}; p.reverbPreMix = {f(premix)}; "
