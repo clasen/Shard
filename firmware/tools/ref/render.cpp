@@ -63,7 +63,7 @@ int main(int argc, char** argv) {
     }
     e->renderVoices(L, R);
     e->multiFx(L, R);
-    for (int n = 0; n < kBlock; n++) rin[n] = (L[n] + R[n]) * 0.25f;  // as the audio task feeds the plate
+    e->reverbInput(L, R, rin);  // as the audio task feeds the reverb
     const float wet = e->reverbReady() ? e->reverbMix() : 0.0f, dry = fminf(1.0f, 2.0f * (1.0f - wet));
     if (wet > 0.0f) e->reverb(rin, wl, wr);
     else for (int n = 0; n < kBlock; n++) wl[n] = wr[n] = 0.0f;

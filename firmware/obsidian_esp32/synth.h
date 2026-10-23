@@ -227,7 +227,10 @@ struct KitPad {
   float level, pan;
   float attack, hold, decay, breakLevel, decay2, velLevel;  // decay, decay2 < 0: never
   float pitch;
-  float cutoff, q, cutoffVel;  // cutoff 0..1 as Obsidian's; velocity opens it by cutoffVel [I]
+  float cutoff, q, cutoffVel;  // cutoff 0..1 as Obsidian's; velocity opens it by cutoffVel [P]
+  // The pad's FX bus: its filter (types as above) and its send to the kit's reverb.
+  uint8_t busFilterType, busFilterOn, unused[2];
+  float busCutoff, busQ, send;
   KitSample s[kPadSamples];
 };
 struct Kit {
@@ -235,7 +238,7 @@ struct Kit {
   uint8_t groupPoly[kKitPads];  // voices allowed per pad group (group 0 and 0 = no limit)
   KitPad pad[kKitPads];
 };
-static_assert(sizeof(KitSample) == 24 && sizeof(KitPad) == 124 && sizeof(Kit) == 4040, "content2bin.py's kit layout");
+static_assert(sizeof(KitSample) == 24 && sizeof(KitPad) == 140 && sizeof(Kit) == 4552, "content2bin.py's kit layout");
 
 // ---------------------------------------------------------------------------
 // Patch: a subset of the Obsidian parameters, in the same units as the .obs XML.
@@ -2096,8 +2099,39 @@ struct DrumVoice {
   int64_t pos[kPadSamples] = {};  // 32.32 positions; reverse samples step backwards
   int64_t step[kPadSamples] = {};
   float gain[kPadSamples] = {};
-  float level = 0, ampStart = 0, t = 0, lp = 0, gainL = 1, gainR = 1, onePole = 0;
-  Biquad bq;
+  float level = 0, ampStart = 0, t = 0, gainL = 1, gainR = 1;
+  // A pad or bus filter: a one-pole for the 6 dB types, a biquad for the others.
+  struct PadFilter {
+    uint8_t type = 0;
+    bool on = false;
+    float a = 0, z = 0;
+    Biquad bq;
+    void set(bool enabled, uint8_t t, float cutoff, float q) {
+      on = enabled;
+      type = t;
+      z = 0;
+      if (!on) return;
+      const float hz = 20.0f * exp2f(9.81378f * Noise::clamp01(cutoff));
+      a = 1.0f - expf(-6.28318531f * fminf(hz, 0.45f * kSampleRate) / kSampleRate);
+      bq = Biquad();
+      const float bq_q = 0.5f + 5.5f * q * q;
+      if (t == 1) bq.set(kNoiseLowPass, hz, bq_q);
+      else if (t == 3) bq.set(kNoiseHighPass, hz, bq_q);
+      else if (t == 4) bq.set(kNoiseBandPass, hz, bq_q);
+    }
+    void run(float* x) {
+      if (!on) return;
+      if (type == 0 || type == 2) {
+        for (int n = 0; n < kBlock; n++) {
+          z += a * (x[n] - z);
+          x[n] = type == 2 ? x[n] - z : z;
+        }
+      } else {
+        bq.run(x);
+      }
+    }
+  };
+  PadFilter filter, bus;
   uint32_t age = 0;
   int choke = 0;  // blocks left of a choke fade, 0 = none
   bool active = false;
@@ -2112,44 +2146,45 @@ struct DrumVoice {
       const int64_t start = (int64_t)(Noise::clamp01(ks.offset) * (smp[k]->length - 2)) << 32;
       step[k] = ks.reverse ? -(int64_t)rate : (int64_t)rate;
       pos[k] = ks.reverse ? ((int64_t)(smp[k]->length - 2) << 32) - start : start;
-      // x0.5: the factory samples peak near full scale; the 808 kick's long sub drove the output's
-      // soft clip (knee at half scale) even at the default volume at unity.
-      gain[k] = ks.level * (0.5f / 32768.0f);
+      // x0.9: the factory samples peak near full scale; this keeps the 808 kick at velocity 100
+      // where the board's output has headroom.
+      gain[k] = ks.level * (0.9f / 32768.0f);
     }
-    level = p.level * (1.0f - p.velLevel * (1.0f - vel));
+    // Level and velocity count squared, the velocity curved: fitted to NS2's 808 kit (pads at Lev
+    // 0.45-1.15, kick at velocity 40/90/127 within 1 dB) [P].
+    const float velScale = 1.0f - p.velLevel + p.velLevel * vel * vel;
+    level = p.level * p.level * velScale * velScale;
     const float pan = Noise::clamp01(p.pan);
     gainL = pan > 0.5f ? 2.0f * (1.0f - pan) : 1.0f;  // linear balance, unity at the centre
     gainR = pan < 0.5f ? 2.0f * pan : 1.0f;
-    if (p.filterOn) {
-      const float hz = 20.0f * exp2f(9.81378f * Noise::clamp01(p.cutoff + p.cutoffVel * vel));
-      lp = 1.0f - expf(-6.28318531f * fminf(hz, 0.45f * kSampleRate) / kSampleRate);
-      bq = Biquad();
-      const float q = 0.5f + 5.5f * p.q * p.q;
-      if (p.filterType == 1) bq.set(kNoiseLowPass, hz, q);
-      else if (p.filterType == 3) bq.set(kNoiseHighPass, hz, q);
-      else if (p.filterType == 4) bq.set(kNoiseBandPass, hz, q);
-    }
-    onePole = 0;
+    filter.set(p.filterOn, p.filterType, p.cutoff + p.cutoffVel * vel, p.q);
+    bus.set(p.busFilterOn, p.busFilterType, p.busCutoff, p.busQ);
     t = 0;
     ampStart = envelope(0.0f);
     choke = 0;
     active = true;
   }
 
-  // The envelope's level at time t: attack, hold, decay to the break level, decay 2 to silence.
+  // The envelope's level at time t: attack, hold, decay to the break level, decay 2 to silence. The
+  // decays fall linearly in dB, 42 dB over their time, then cut: NS2's 808 kit pads with decay 2
+  // of 1 s and 0.24 s end within 10 ms of it [P]; the first decay's shape is [I].
   float envelope(float at) const {
     const KitPad& p = *pad;
     if (at < p.attack) return at / p.attack;
     at -= p.attack;
     if (at < p.hold || p.decay < 0.0f) return 1.0f;
     at -= p.hold;
-    if (at < p.decay) return 1.0f + (p.breakLevel - 1.0f) * at / p.decay;
+    if (at < p.decay) return p.breakLevel + (1.0f - p.breakLevel) * fall(at / p.decay);
     at -= p.decay > 0.0f ? p.decay : 0.0f;
     if (p.decay2 < 0.0f) return p.breakLevel;
-    return at < p.decay2 ? p.breakLevel * (1.0f - at / p.decay2) : 0.0f;
+    return at < p.decay2 ? p.breakLevel * fall(at / p.decay2) : 0.0f;
   }
 
-  void render(float* outL, float* outR) {
+  // 1 down to -42 dB over x = 0..1.
+  static float fall(float x) { return exp2f(-6.9762f * x); }
+
+  // Adds the hit to the dry mix and, by the pad's bus send, to the reverb input.
+  void render(float* outL, float* outR, float* send) {
     float x[kBlock] = {};
     bool playing = false;
     for (int k = 0; k < kPadSamples; k++) {
@@ -2169,25 +2204,19 @@ struct DrumVoice {
       if (n < kBlock) smp[k] = nullptr;
       else playing = true;
     }
-    if (pad->filterOn) {
-      if (pad->filterType == 0 || pad->filterType == 2) {
-        const bool hp = pad->filterType == 2;
-        for (int n = 0; n < kBlock; n++) {
-          onePole += lp * (x[n] - onePole);
-          x[n] = hp ? x[n] - onePole : onePole;
-        }
-      } else {
-        bq.run(x);
-      }
-    }
+    filter.run(x);
+    bus.run(x);
     t += (float)kBlock / kSampleRate;
     float aEnd = envelope(t);
     if (choke) aEnd *= (float)(--choke) / kChokeBlocks;
     float a = ampStart * level;
     const float aStep = (aEnd - ampStart) * level * (1.0f / kBlock);
+    // The send takes the mono hit as the voices' reverb input takes the mix ((L + R) / 4).
+    const float sendGain = 0.5f * pad->send;
     for (int n = 0; n < kBlock; n++, a += aStep) {
       outL[n] += x[n] * a * gainL;
       outR[n] += x[n] * a * gainR;
+      send[n] += x[n] * a * sendGain;
     }
     ampStart = aEnd;
     if (!playing || aEnd <= 0.0f) active = false;
@@ -2199,6 +2228,7 @@ struct Engine {
   Patch patch;
   Voice voices[kVoices];
   DrumVoice drums[kDrumVoices];
+  float kitSend[kBlock] = {};  // the kit's bus sends of this block, the reverb input in a kit
   Plate plate;
   Freeverb room;
   Line reverbPre;               // pre-delay, up to the Hall's 350 ms
@@ -2361,7 +2391,8 @@ struct Engine {
     src[kSrcPitchWheelUp] = wheel > 0.0f ? wheel : 0.0f;
     src[kSrcPitchWheelDown] = wheel < 0.0f ? -wheel : 0.0f;
     memcpy(src + kSrcMacro1, macro, sizeof(macro));
-    for (auto& d : drums) if (d.active) d.render(dryL, dryR);
+    memset(kitSend, 0, sizeof(kitSend));
+    for (auto& d : drums) if (d.active) d.render(dryL, dryR, kitSend);
     if (patch.kit) {
       blockDc(dryL, 0);
       blockDc(dryR, 1);
@@ -2432,6 +2463,12 @@ struct Engine {
   }
 
   float reverbMix() const { return Noise::clamp01(patch.reverbMix + global[2]); }
+
+  // The reverb's mono input for a block of the voice mix: the mix itself, or a kit's bus sends.
+  void reverbInput(const float* dryL, const float* dryR, float* in) const {
+    if (patch.kit) memcpy(in, kitSend, sizeof(kitSend));
+    else for (int n = 0; n < kBlock; n++) in[n] = (dryL[n] + dryR[n]) * 0.25f;
+  }
   bool reverbReady() const { return (patch.reverbRoom ? room.ok : plate.ok) && reverbPre.buf; }
 
   // The wet block for a mono input block (core 0): pre-delay crossfade, plate or room, then HCut as

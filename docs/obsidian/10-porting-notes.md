@@ -595,12 +595,15 @@ Findings fixed with this:
 - Slate kits (NS2's sample drum machine): `content2bin.py` turns a `.slt` into a kit of 32 pads
   (MIDI notes from the kit's map, C3 up) and a Drums preset that points at it; the engine plays
   them as one-shot hits with up to 3 layered samples, a filter (LP 6/12, HP 6/12, BP), the
-  A/H/D/break/D2 envelope, pitch, pan and the group polyphony that chokes open hi-hats. Read from
-  the kit files and the manual, not measured against NS2 **[I]**: levels linear, velocity opening
-  the filter by `Vel` (the 808 kit's LP 6 at `CutO` 0.19 with `Vel` 1), straight-line envelope
-  segments. Not played: `.mwav` multisamples, FX buses (compressor/EQ), waveshaper, pitch and
-  filter envelopes, the kit's reverb/delay sends and the Sustain trigger modes. A pad hit costs
-  little CPU (five kits at 2–5 % of core 1).
+  A/H/D/break/D2 envelope, pitch, pan and the group polyphony that chokes open hi-hats. Measured
+  against NS2's 808 and 909 kits played pad by pad **[P]**: level `Lev²`, velocity
+  `(1 − VL + VL·v²)²` (the 808 kick at velocity 40/90/127 within 0.3 dB), velocity opening the
+  filter by `Vel`, decays falling linearly in dB, 42 dB over their time, and each bus's filter
+  and reverb send (`S1`) into the kit's reverb returned at the main bus's `R1`. 54 of 60 hits
+  are within 1.5 dB of NS2 and ±10 ms of its length; the reverb tails of the 909's bus pads
+  within 2 dB. Not played: `.mwav` multisamples, bus and main EQ/compressor, delay sends (`S2`),
+  waveshaper, pitch and filter envelopes and the Sustain trigger modes. A pad hit costs little
+  CPU (2–5 % of core 1).
 - Level reference: NS2's output level in these takes drifts between sessions (the saw test
   `zz01` came out at −22.6 dB against the port, not −5.6). Record a reference patch in the same
   session and compare against it, not against a fixed gain.

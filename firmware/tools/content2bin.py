@@ -32,7 +32,9 @@ in a shared path table, and the value. Layout, little endian:
   kit      char name[40], u8 group polyphony[32] (0 = no limit), 32 pads
   pad      u8 note, group, filter type (0 LP 6, 1 LP 12, 2 HP 6, 3 HP 12, 4 BP), filter on,
            f32 level, pan, attack, hold, decay, break level, decay 2 (decays < 0: none),
-           velocity to level, pitch (semitones), cutoff, Q, velocity to cutoff, 3 samples
+           velocity to level, pitch (semitones), cutoff, Q, velocity to cutoff,
+           u8 bus filter type, bus filter on, 2 x u8 0, f32 bus cutoff, bus Q, reverb send,
+           3 samples
   pad sample  i32 sample index (-1 = none), f32 level, pan, pitch (semitones), start offset,
            u8 reverse, 3 x u8 0
   data     every block starts on a 4-byte boundary
@@ -64,7 +66,7 @@ PATH = struct.Struct("<48s")
 ZONE = struct.Struct("<32s4B2f")
 PRESET = struct.Struct("<40sB3x2I")
 KIT = struct.Struct("<40s32B")
-KIT_PAD = struct.Struct("<4B12f")
+KIT_PAD = struct.Struct("<4B12f2B2x3f")
 KIT_SAMPLE = struct.Struct("<i4fB3x")
 RECORD_VALUE, RECORD_TABLE, RECORD_ZONES, RECORD_CLEAR, RECORD_KIT = 0, 1, 2, 3, 4
 NS2 = "/Applications/NanoStudio 2.app/Wrapper/NanoStudio 2.app"
@@ -236,6 +238,7 @@ class Image:
         """Converts one Slate kit into a kit and its Drums preset; returns what it does not play."""
         root = ET.parse(os.path.join(path, "Package.slt")).getroot()
         name = "Kit " + os.path.splitext(os.path.basename(path))[0]
+        fx = root.find("FX")
         midi, groups = root.find("MIDI"), root.find("ExGrp")
         poly = [int(groups.get(f"P{g + 1:02d}", "0")) for g in range(32)]
         gaps, pads = set(), []
@@ -261,8 +264,15 @@ class Image:
                 gaps.add(f"velocity split {osc.get('Type')} (layered)")
             if pad.get("TM") != "One-Shot":
                 gaps.add(f"trigger mode {pad.get('TM')} (one-shot)")
-            if pad.get("OBus") not in (None, "None"):
-                gaps.add("FX buses")
+            bus = fx.find(f"Bus{pad.get('OBus')}") if pad.get("OBus") not in (None, "None") else None
+            bfilt = bus.find("Filt") if bus is not None else None
+            btype = KIT_FILTERS.get(bfilt.get("Type")) if bfilt is not None else None
+            bon = bfilt is not None and bfilt.get("En") == "1" and btype is not None
+            send = num(bus.get("S1")) if bus is not None and bus.get("SEn") == "1" else 0.0
+            if bus is not None and any(e is not None and e.get("En") == "1" for e in (bus.find("EQ"), bus.find("Comp"))):
+                gaps.add("bus EQ/compressor")
+            if bus is not None and bus.get("SEn") == "1" and num(bus.get("S2")) > 0:
+                gaps.add("delay sends")
             if pad.find("WS") is not None and pad.find("WS").get("En") == "On":
                 gaps.add("waveshaper")
             if num(pitch.get("AL")) != 0:
@@ -279,12 +289,21 @@ class Image:
                           inf(amp.get("D")), num(amp.get("S")), inf(amp.get("D2")), num(amp.get("VL")),
                           num(pitch.get("Trn")) + num(pitch.get("Dtn")), num(flt.get("CutO")), num(flt.get("Q")),
                           num(flt.get("Vel"))),
+                         (btype or 0, 1 if bon else 0, num(bfilt.get("CutO")) if bon else 0.0,
+                          num(bfilt.get("Q")) if bon else 0.0, send),
                          samples))
-        fx = root.find("FX")
-        if fx.find("Rev").get("En") == "1" or fx.find("Dly").get("En") == "1":
-            gaps.add("reverb/delay sends")
-        self.presets.append((name, PAD_ORDER.index("Drums"),
-                             [(self.path("kit"), RECORD_KIT, len(self.kits)), (self.path("reverbMix"), RECORD_VALUE, 0.0)]))
+        main = fx.find("Main")
+        if any(e is not None and e.get("En") == "1" for e in (main.find("EQ"), main.find("Comp"))):
+            gaps.add("main EQ/compressor")
+        # The bus sends feed the kit's reverb, heard at the main bus's return level.
+        sends = any(b[4] > 0 for _, _, _, _, _, b, _ in pads)
+        records = [(self.path("kit"), RECORD_KIT, len(self.kits)),
+                   (self.path("reverbMix"), RECORD_VALUE,
+                    num(main.get("R1")) if sends and main.get("REn") == "1" else 0.0)]
+        for kind, body in statements(obs2preset.reverb_fields(fx.find("Rev")).splitlines()):
+            lhs, _, rhs = body.partition("=")
+            records.append((self.path(lhs.strip()[2:]), RECORD_VALUE, number(rhs.strip(), self.env)))
+        self.presets.append((name, PAD_ORDER.index("Drums"), records))
         self.kits.append((name, poly, pads))
         return sorted(gaps)
 
@@ -357,8 +376,8 @@ class Image:
         index = {name: i for i, name in enumerate(self.samples)}
         for name, poly, pads in self.kits:
             blob += KIT.pack(name.encode()[:39], *poly)
-            for note, group, ftype, fon, values, samples in pads:
-                blob += KIT_PAD.pack(note, group, ftype, fon, *values)
+            for note, group, ftype, fon, values, bus, samples in pads:
+                blob += KIT_PAD.pack(note, group, ftype, fon, *values, *bus)
                 for s in samples:
                     blob += KIT_SAMPLE.pack(-1, 0, 0.5, 0, 0, 0) if s is None else KIT_SAMPLE.pack(index[s[0]], *s[1:5], s[5])
         align()

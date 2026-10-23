@@ -135,7 +135,7 @@ static void audioTask(void*) {
     xSemaphoreTake(gRevDone, portMAX_DELAY);
     memcpy(wetL, gWetL, sizeof(wetL));
     memcpy(wetR, gWetR, sizeof(wetR));
-    for (int n = 0; n < syn::kBlock; n++) gRevIn[n] = (dryL[n] + dryR[n]) * 0.25f;
+    gEngine->reverbInput(dryL, dryR, gRevIn);
     xSemaphoreGive(gRevStart);
 
     gEngine->mixOut(dryL, dryR, wetL, wetR, out);
