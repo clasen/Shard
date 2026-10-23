@@ -20,6 +20,7 @@ FIRMWARE = os.path.join(HERE, "..", "obsidian_esp32")
 WAVETABLES = "/Applications/NanoStudio 2.app/Wrapper/NanoStudio 2.app/WaveTables"
 
 ANALOG_WAVES = {"Sine": "kSine", "Tri": "kTri", "Saw": "kSaw", "Square": "kSquare", "Pulse": "kPulse", "Bi-Pulse": "kBiPulse"}
+ANALOG_SYNCS = {"OFF": "kSyncOff", "ON": "kSyncAnalog", "ANALOG": "kSyncAnalog", "DIGITAL": "kSyncDigital"}
 NOISE_TYPES = {"White": "kNoiseWhite", "Low Passed": "kNoiseLowPass", "High Passed": "kNoiseHighPass",
                "Band Passed": "kNoiseBandPass", "Notched": "kNoiseNotch"}
 FILTER_TYPES = {"LP 24-A": "kFilterLP24A", "LP 12-D": "kFilterLP12D", "LP 12-A": "kFilterLP12A",
@@ -117,7 +118,8 @@ OSC_PARAMS = {"Pitch Coarse": "kDstOscPitch", "Pitch Fine": "kDstOscFine", "Leve
               "FM OP2 Out": "dstFmConn(6)", "FM OP3 Out": "dstFmConn(7)", "FM OP1 Freq": "dstFmRatio(0)",
               "FM OP2 Freq": "dstFmRatio(1)", "FM OP3 Freq": "dstFmRatio(2)",
               "NanoSaw Detune": "kDstNsDetune", "NanoSaw Mix": "kDstNsMix", "PD Phase Dist": "kDstPdDist",
-              "An Pulse Width": "kDstPulseWidth", "Phase": "kDstOscPhase"}
+              "An Pulse Width": "kDstPulseWidth", "An Sync Ratio": "kDstSyncRatio",
+              "An Sync Hardness": "kDstSyncHardness", "Phase": "kDstOscPhase"}
 PD_WAVES = {"Saw": "kPdSaw", "Square": "kPdSquare", "Pulse": "kPdPulse", "Double Sine": "kPdDoubleSine",
             "Saw Pulse": "kPdSawPulse", "Res Saw": "kPdResSaw", "Res Fat Saw": "kPdResFatSaw",
             "Res Tri": "kPdResTri", "Res Tri HP": "kPdResTriHP"}
@@ -210,9 +212,12 @@ class Converter:
                 self.unsupported(where, f"Analog Wave={wave} not supported, using Square (PWM={a.get('PWM')} ignored)")
             self.emit(f"{q}.type = kOscWave; {q}.wave = {ANALOG_WAVES.get(wave, 'kSquare')};"
                       + (f" {q}.pulseWidth = {f(num(a.get('PWM')))};" if wave in ("Pulse", "Bi-Pulse") else ""))
-            if a.get("Sync", "OFF").upper() != "OFF":  # older presets write "Off"
-                # Not a plain hard sync: NS2 at SRat 0.5 keeps the fundamental and adds highs (10-porting-notes.md).
-                self.unsupported(where, f"Sync={a.get('Sync')} not mapped")
+            sync = a.get("Sync", "OFF").upper()  # V=1 presets write Off/On; On is read as ANALOG [I]
+            if sync not in ANALOG_SYNCS:
+                self.unsupported(where, f"Sync={a.get('Sync')} not supported, off")
+            elif sync != "OFF":
+                self.emit(f"{q}.sync = {ANALOG_SYNCS[sync]}; {q}.syncRatio = {f(num(a.get('SRat')))}; "
+                          f"{q}.syncShape = {f(num(a.get('SShp')))};")
         elif typ == "Wavetable":
             w = o.find("Wave")
             sym = self.table_symbol(w.find("WT").get("Name"))

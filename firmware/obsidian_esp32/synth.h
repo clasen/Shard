@@ -24,6 +24,8 @@ constexpr float kMipBaseHz = 20.0f;
 
 enum Wave { kSine, kTri, kSaw, kSquare, kPulse, kBiPulse };
 constexpr int kWaveCount = 4;  // band-limited tables; the pulse is read from the saw's
+// Anlg/Sync (0x100562188): Off, ANALOG (restart windowed by SShp), DIGITAL (bare restart).
+enum OscSync { kSyncOff, kSyncAnalog, kSyncDigital };
 enum OscType { kOscWave, kOscTable, kOscNoise, kOscSample, kOscFM, kOscNanoSaw, kOscPD };
 enum PdWave { kPdSaw, kPdSquare, kPdPulse, kPdDoubleSine, kPdSawPulse, kPdResSaw, kPdResFatSaw, kPdResTri, kPdResTriHP };
 enum VelSplit { kVelLayer, kVelSplit2, kVelSplit3 };
@@ -35,6 +37,7 @@ enum FilterType { kFilterLP24A, kFilterLP12D, kFilterLP12A, kFilterHP12A, kFilte
                   kFilterCombPos, kFilterCombNeg };
 constexpr int kShapes = 6;         // WS Tube .. WS Tri
 constexpr int kShapeLen = 1025;    // NS2's waveshaper tables: a ramp from -1 to 1 through the curve
+constexpr int kSyncWindowLen = 256;  // half of ANALOG sync's window, 0 at the restart to 1 at its edge
 enum EnvType { kEnvADSR, kEnvAD, kEnvBipolar };
 // Filt/Rout, in NS2's enum order (0x1004036c0): PARALLEL, SERIES, STEREO (F2 runs F1's settings).
 enum FilterRoute { kRouteParallel, kRouteSeries, kRouteStereo };
@@ -68,6 +71,7 @@ enum ModDest : int8_t {
   kDstFmRatio = kDstFmConn + kFmConns, // FM operator ratios (FM OPn Freq), 3 of them
   kDstNsDetune = kDstFmRatio + 3, kDstNsMix, kDstPdDist,  // NanoSaw Detune/Mix, PD Phase Dist
   kDstPulseWidth,                      // An Pulse Width
+  kDstSyncRatio, kDstSyncHardness,     // An Sync Ratio, An Sync Hardness
   kDstOscPhase,                        // Phase: shifts the running oscillator, 1 = a full cycle
   kDstCutoff, kDstCutoffSlow, kDstQ, kDstFilterGain, kDstDrive,
   kDstAmpGain,
@@ -97,6 +101,7 @@ struct WaveBank {
   int16_t table[kWaveCount][kMips][kTableLen + 1];
   float scale[kWaveCount][kMips];  // gain that brings each table to the RMS of a sine, like NS2
   float shaper[kShapes][kShapeLen];  // waveshaper filter types
+  float syncWindow[kSyncWindowLen + 2];  // 0.5 - 0.5cos over half a window (NS2's 0x1004e210c table)
 
   // NS2's waveshaper curves (0x1000fd848) over x in [-1, 1]. The circular knees join a straight
   // segment to a flat top: y = c + sqrt(r2 - (min(|v|, e) - e)^2) past the knee point.
@@ -178,6 +183,8 @@ struct WaveBank {
       }
     }
     buildShapers();
+    for (int i = 0; i <= kSyncWindowLen; i++) syncWindow[i] = 0.5f - 0.5f * cosf(3.14159265f * i / kSyncWindowLen);
+    syncWindow[kSyncWindowLen + 1] = 1.0f;  // float rounding can land on the edge itself
   }
 
   static inline int mipFor(float hz) {
@@ -279,6 +286,8 @@ struct OscPatch {
   float filterMix = 0.0f;  // FMix: share of the oscillator sent to the F2 bus instead of F1
   float phaseOffset = 0.0f;  // POff: the phase each note starts at, in cycles
   float pulseWidth = 0.5f;   // PWM (Analog Pulse)
+  OscSync sync = kSyncOff;   // Analog Sync, with SRat and SShp
+  float syncRatio = 0.0f, syncShape = 0.0f;
   // Noise (Nois): Type, Cut, Q, Deci, plus the mod-matrix route Amp Env -> Noise Q.
   NoiseType noiseType = kNoiseWhite;
   float noiseCut = 0.5f, noiseQ = 0.0f, noiseDeci = 0.0f;
@@ -489,6 +498,7 @@ template <class F> void forEachField(Patch& p, F&& f) {
     at(o.enabled, "osc[%d].enabled", i); at(o.type, "osc[%d].type", i); at(o.wave, "osc[%d].wave", i);
     at(o.position, "osc[%d].position", i); at(o.ring, "osc[%d].ring", i); at(o.keyTrack, "osc[%d].keyTrack", i);
     at(o.phaseOffset, "osc[%d].phaseOffset", i); at(o.pulseWidth, "osc[%d].pulseWidth", i);
+    at(o.sync, "osc[%d].sync", i); at(o.syncRatio, "osc[%d].syncRatio", i); at(o.syncShape, "osc[%d].syncShape", i);
     at(o.transpose, "osc[%d].transpose", i); at(o.fine, "osc[%d].fine", i); at(o.level, "osc[%d].level", i);
     at(o.filterMix, "osc[%d].filterMix", i); at(o.noiseType, "osc[%d].noiseType", i);
     at(o.noiseCut, "osc[%d].noiseCut", i); at(o.noiseQ, "osc[%d].noiseQ", i); at(o.noiseDeci, "osc[%d].noiseDeci", i);
@@ -1507,10 +1517,12 @@ struct Voice {
   float posPrev[3] = {-1, -1, -1};  // wavetable position at the end of the previous block
   float levPrev[3] = {-1, -1, -1};  // oscillator level at the end of the previous block
   float phasePrev[3] = {};           // Osc Phase modulation of the previous block
+  uint32_t master[3] = {};           // oscillator sync: the master's phase, at the oscillator's frequency
 
   void shiftPhase(int i, float cycles) {
     const uint32_t d = (uint32_t)(int64_t)(cycles * 4294967296.0);
     osc[i].phase += d;
+    master[i] += d;
     for (uint32_t& ph : fm[i].ph) ph += d;
     for (uint32_t& ph : nano[i].ph) ph += d;
     pd[i].ph += d;
@@ -1542,7 +1554,10 @@ struct Voice {
       if (Filter::comb(p.f2.type)) comb[1].clear();
     }
     // Each note starts at POff: in NS2 two saws a half cycle apart cancel their odd harmonics.
-    for (int i = 0; i < 3; i++) osc[i].phase = (uint32_t)(uint64_t)(p.osc[i].phaseOffset * 4294967296.0);  // POff 1 wraps to 0
+    for (int i = 0; i < 3; i++) {
+      osc[i].phase = (uint32_t)(uint64_t)(p.osc[i].phaseOffset * 4294967296.0);  // POff 1 wraps to 0
+      master[i] = 0;
+    }
     velocityGains(p, vel, oscGain);
     for (int i = 0; i < 3; i++) {
       if (p.osc[i].type == kOscSample) sampler[i].start(p.osc[i], n);
@@ -1688,8 +1703,35 @@ struct Voice {
         continue;
       }
       float hz = 440.0f * exp2f((oscPitch - 69.0f) / 12.0f);
+      // Oscillator sync (0x100562188, 0x1004e27ac): a master at the oscillator's frequency restarts
+      // it, running exp2(4 SRat) times faster, at the fraction of a sample the master
+      // overshot by. ANALOG multiplies the output by a 0.5 - 0.5cos dip, 0 at each restart, over
+      // min(exp2(8 - 4 SShp), period) samples centred on it; DIGITAL restarts bare.
+      const bool synced = op.type == kOscWave && op.sync != kSyncOff;
+      uint32_t masterInc = 0, restart = 0, halfSpan = 0;
+      float spanScale = 0.0f;
+      if (synced) {
+        masterInc = (uint32_t)(hz / kSampleRate * 4294967296.0f);
+        if (op.sync == kSyncAnalog) {
+          const int hardness = (int)exp2f(8.0f - 4.0f * Noise::clamp01(op.syncShape + om[i][kDstSyncHardness]));
+          const int period = (int)(kSampleRate / hz + 0.5f);
+          halfSpan = (uint32_t)(hardness < period ? hardness : period) * (masterInc >> 1);
+          spanScale = (float)kSyncWindowLen / (float)halfSpan;
+        }
+        hz = fminf(hz * exp2f(4.0f * Noise::clamp01(op.syncRatio + om[i][kDstSyncRatio])), 0.49f * kSampleRate);
+      }
       osc[i].inc = (uint32_t)(hz / kSampleRate * 4294967296.0f);
       int mip = WaveBank::mipFor(hz);
+      auto sync = [&](float& y) {
+        const uint32_t m = master[i], d = m < 0x80000000u ? m : 0u - m;  // to the nearest restart
+        if (d < halfSpan) {
+          const float x = (float)d * spanScale;
+          const int k = (int)x;
+          y *= gBank->syncWindow[k] + (gBank->syncWindow[k + 1] - gBank->syncWindow[k]) * (x - (float)k);
+        }
+        master[i] = m + masterInc;
+        if (master[i] < masterInc) osc[i].phase = restart + (uint32_t)((uint64_t)master[i] * osc[i].inc / masterInc);
+      };
       if (op.type == kOscTable) {
         const Wavetable& t = *op.table;
         const float last = (float)(t.frames - 1);
@@ -1718,17 +1760,30 @@ struct Voice {
         const float pw = fminf(fmaxf(op.pulseWidth + om[i][kDstPulseWidth], 0.01f), 0.99f);
         const float g = gBank->scale[kSaw][mip] * 0.58f;
         const uint32_t width = (uint32_t)(pw * 4294967295.0f);
-        for (int n = 0; n < kBlock; n++) r[n] = osc[i].tickPulse(gBank->table[kSaw][mip], width) * g;
+        // NS2's synced pulse is saw(ph) - saw(ph + width) [B], restarting that ph at 0: the port's
+        // reads sit half a cycle and a width away from it [I].
+        restart = width - 0x80000000u;
+        for (int n = 0; n < kBlock; n++) {
+          r[n] = osc[i].tickPulse(gBank->table[kSaw][mip], width) * g;
+          if (synced) sync(r[n]);
+        }
       } else if (op.wave == kBiPulse) {
         const float pw = fminf(fmaxf(op.pulseWidth + om[i][kDstPulseWidth], 0.01f), 0.49f);
         // Half the pulse's gain: NS2's level and spectrum at PWM 0.23 [P].
         const float g = gBank->scale[kSaw][mip] * 0.29f;
         const uint32_t width = (uint32_t)(pw * 4294967295.0f);
-        for (int n = 0; n < kBlock; n++) r[n] = osc[i].tickBiPulse(gBank->table[kSaw][mip], width) * g;
+        restart = width - 0x80000000u;
+        for (int n = 0; n < kBlock; n++) {
+          r[n] = osc[i].tickBiPulse(gBank->table[kSaw][mip], width) * g;
+          if (synced) sync(r[n]);
+        }
       } else {
         const int16_t* tab = gBank->table[op.wave][mip];
         const float g = gBank->scale[op.wave][mip];
-        for (int n = 0; n < kBlock; n++) r[n] = osc[i].tick(tab) * g;
+        for (int n = 0; n < kBlock; n++) {
+          r[n] = osc[i].tick(tab) * g;
+          if (synced) sync(r[n]);
+        }
       }
     }
 

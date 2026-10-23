@@ -232,7 +232,8 @@ in both USB modes the board acts as a BLE central (the core's `BLE` library, Blu
   - `OutT`, `Warp`, `Qtz`, `Atk` (fade-in) and `PhOf`.
   - Sync: OFF (random phase), KEY (`PhOf`) and GLOBAL (the engine LFO's phase stands in for the
     transport).
-  - Tempo-synced rates play at 120 BPM. FM and FM Sync are missing.
+  - Tempo-synced rates play at the engine's tempo (MIDI clock or `bpm`). FM and FM Sync are
+    missing.
 - **Global comb filter** (F3 `Comb Pos`/`Comb Neg`), stereo:
   - Decompiled algorithm ([04](04-filters.md#formant-waveshapers-and-lo-fi-b)).
   - Keytrack on the last note.
@@ -279,7 +280,11 @@ in both USB modes the board acts as a BLE central (the core's `BLE` library, Blu
     NS2, and F1 and F2 output `Pan` with the port's linear law.
   - `STEREO` runs both buses through F1, because F2 runs F1's configuration.
   - Matrix routes to `Filter 2` (Cutoff, Q, Output Gain); `Filter 1+2` reaches both.
-  - Per-oscillator `Pan` is missing.
+  - Per-oscillator `Pan` is missing. It only matters with `STEREO` routing **[P]**: with
+    `PARALLEL`, NS2 takes at `Pan` 0, 0.25, 0.75 and 1 have the same left-channel level as the
+    centred saw, and 72 of the 74 factory presets that pan an oscillator use `STEREO`. NS2 mixes
+    the oscillators into the buses at `0x1005a6498` (kernels `0x1003af0cc`/`178`/`274` for 1–3
+    oscillators, up to 4 voices per SIMD lane group).
 - **Waveshapers** (`WS Tube/Soft/Hard/Enhance/Sine/Tri`) as an F1, F2 or F3 type, with the
   decompiled curves in 1025-point tables (in the `WaveBank`, PSRAM) and the `Drv` and `WSGn`
   gains ([04](04-filters.md#formant-waveshapers-and-lo-fi-b)). No oversampling: the folders
@@ -477,7 +482,7 @@ missing: the 147/71 that flag it are tempo-synced delays played at 120 BPM.
 | Tempo (LFOs and delay at 120 BPM) | 131 / 147 | 48 / 71 | the port has no transport |
 | Per-oscillator pan and width | 93 | 16 | |
 | Chorus / Ensemble / Flanger | 62 | 54 | |
-| Sync, Pulse/Bi-Pulse | 46 / 45 | 61 / 25 | |
+| ~~Sync~~, Pulse/Bi-Pulse | — / 45 | — / 25 | sync is implemented ([03](03-oscillators.md)) |
 | Per-oscillator phase offset | 45 | 58 | |
 | Envelope breakpoint and delay | 39 | 39 | |
 | Missing filter types (Formant, Lo-Fi, LP 6-D, Comb on F1/F2) | 50 | 23 | |
@@ -609,6 +614,15 @@ Findings fixed with this:
   averaged over a beat) or the `bpm` command; 120 until then. They used to be converted at a
   fixed 120 BPM. Drum Sequence 1, recorded in NS2 at 125 BPM, went from 9.6 to 4.5 dB of
   envelope difference rendered at its tempo (`render ... bpm=125`).
+- Oscillator sync (`Sync`, `SRat`, `SShp` and the `An Sync Ratio`/`An Sync Hardness`
+  destinations), decompiled ([03](03-oscillators.md)): a hidden master at the note's frequency
+  restarts the oscillator, which runs up to 16 times faster, and `ANALOG` softens each restart
+  with a cosine dip. The `zz38` test patch matches NS2 in every octave band. Against the factory
+  takes, the spectrum difference went from 8.6 to 3.2 dB on In Lazy Curls, 8.1 to 4.5 on Pluck
+  or Pad, 5.7 to 4.2 on Iron Drops, 4.2 to 2.3 on Rhythm Pad and 4.8 to 3.4 on BassGroove.
+  Magic Pitch got worse (4.2 to 8.9 dB) and 1984 slightly (4.4 to 5.4); see
+  [03](03-oscillators.md). On the board a synced oscillator costs a few percent of core 1 with four
+  notes.
 - Level reference: NS2's output level in these takes drifts between sessions (the saw test
   `zz01` came out at −22.6 dB against the port, not −5.6). Record a reference patch in the same
   session and compare against it, not against a fixed gain.

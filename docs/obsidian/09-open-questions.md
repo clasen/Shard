@@ -17,7 +17,7 @@ Methods:
 | 4 | ~~Shape of the envelope segments~~ **Solved** (UI and DSP), and the times `T = Tmax·x³` ([05](05-envelopes-lfos.md)) | D | `0x10053163c` |
 | 5 | Scale of `Dept`. **Partial**: `m = 1` = the parameter's maximum (filter). The `Dept → m` conversion does not show up as an `scvtf` of field `+0x20` in the static code; left for the render test | R | Render test in [06](06-modulation.md#scales) |
 | 6 | ~~How modulation is added~~ **Solved** for the filter: in the parameter's units, clamped to its range | D | `0x10055a290` |
-| 7 | ~~Analog antialiasing~~ **Solved**: Sine/Tri/Saw/Square are `Analog.tbl` with mipmaps ([03](03-oscillators.md)). The Pulse/Bi-Pulse details are missing | D | `0x100562188`, `0x1004e2234` |
+| 7 | ~~Analog antialiasing~~ **Solved**: Sine/Tri/Saw/Square are `Analog.tbl` with mipmaps, and sync is decompiled ([03](03-oscillators.md)). Still missing: the Pulse/Bi-Pulse details and the sync restart phase for ratios that are not whole numbers (Magic Pitch) | D | `0x100562188`, `0x1004e2234`, `0x1004e27ac` |
 | 8 | ~~`SRat` → ratio~~ **Solved**: `2^(4·SRat)`. Still to confirm which mode is `ANALOG` and what the hardness does | D | `0x100562188` |
 | 9 | ~~NanoSaw~~ **Solved**: 7 DPW saws, detunes and gains ([03](03-oscillators.md)) | D | `0x10046d1c4` |
 | 10 | PD formulas. **Partial**: structure, `PD` curves and the pitch limit. The exact breakpoints of Square/Pulse/Double Sine/Saw Pulse are missing | D | `0x10056da2c` and routines |
