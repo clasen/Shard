@@ -114,6 +114,11 @@ to saturate as in NS2, the ladder gets twice the input and its output is halved.
 factor, the tests at Drive 0.3, 0.6 and 1.0 (oscillator at level 1 and 0.25) match NS2 in level
 and bands. Without it, at Drive 1 the port came out up to 5.6 dB louder and brighter.
 
+**Output Gain comes after the saturator [P]**: a saw through LP 12-A at Drive 0.894 with `OGn`
+0.5 plays 6 dB under `OGn` 1 in NS2 (test `zu12`). The port used to scale the ladder's input by
+it, so the saturation ate most of the cut and it came out 5.3 dB loud. Bell Evolve, whose knob
+drives the filter and lowers its Output Gain, was 4.3 dB loud for this reason.
+
 **F1 disabled (`En=Off`)** does not filter: in the port it is `kFilterOff`, which only applies
 the gain.
 

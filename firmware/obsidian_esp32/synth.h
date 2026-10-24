@@ -983,7 +983,8 @@ struct Filter {
     } else if (onLadder(type)) {
       // The voice feeds its filters half level; NS2's ladder saturates as if fed full level, so it
       // gets 2x and its output is halved back (fitted against NS2 renders at Drive 0.3 to 1).
-      for (int n = 0; n < kBlock; n++) x[n] = 0.5f * ladder.tick(2.0f * inGain * x[n]);
+      // Output Gain (in inGain, 0.5 at OGn 1) scales the ladder's output, after the saturation.
+      for (int n = 0; n < kBlock; n++) x[n] = inGain * ladder.tick(x[n]);
     } else {
       for (int n = 0; n < kBlock; n++) x[n] *= inGain;
       bq.run(x);

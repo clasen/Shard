@@ -632,9 +632,11 @@ Findings fixed with this:
 - Delay `Cross` and `Pingpong`: stereo takes showed both lines fed by their own channel, with all
   of `FB` going across. The port fed the sum into the left line only, so a centred note echoed on
   the left at twice its level; the old `zf03`/`zf04` takes now match echo by echo (±0.6 dB, they
-  were up to 6 dB off). Bell Evolve (`Pingpong`, 0.34 ms) was 7.5 dB loud on the left. Still
-  open: its voice without FX is 4.3 dB louder than NS2's (LFOs on the oscillator levels, an
-  FM-type LFO the port plays as a sine).
+  were up to 6 dB off). Bell Evolve (`Pingpong`, 0.34 ms) was 7.5 dB loud on the left.
+- Output Gain after the ladder's saturation, not before ([04](04-filters.md)): Bell Evolve went
+  from 4.4 dB loud to within 0.3 dB of NS2, and against the factory takes Plunk from 3.4 to 0 dB
+  of gain error, Hardstyle Lead from 1.9 to 0 and Hang Drum from 0.9 to 0.2. The level
+  modulation scale, `Lev + 2·m`, was confirmed on the way (`zu05`, `zu06`).
 - Level reference: NS2's output level in these takes drifts between sessions (the saw test
   `zz01` came out at −22.6 dB against the port, not −5.6). Record a reference patch in the same
   session and compare against it, not against a fixed gain.
