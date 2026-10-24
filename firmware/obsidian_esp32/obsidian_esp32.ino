@@ -504,8 +504,14 @@ static void handleLine(char* line) {
     if (gCapBlocks < kCapBlocks) {
       Serial.println("no complete capture");
     } else {
-      Serial.printf("CAP %u\n", (unsigned)(kCapBlocks * syn::kBlock * 4));
-      Serial.write((const uint8_t*)gCap, kCapBlocks * syn::kBlock * 4);
+      const size_t size = kCapBlocks * syn::kBlock * 4;
+      Serial.printf("CAP %u\n", (unsigned)size);
+      // In pieces: one large write drops whatever does not fit the USB buffer in time.
+      for (size_t off = 0; off < size;) {
+        const size_t n = Serial.write((const uint8_t*)gCap + off, size - off < 512 ? size - off : 512);
+        if (n == 0) delay(1);
+        off += n;
+      }
     }
   } else if (!strcmp(cmd, "help")) {
     printHelp();
