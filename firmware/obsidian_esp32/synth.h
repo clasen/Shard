@@ -259,6 +259,8 @@ struct EnvPatch {
   float startLevel = 0.0f, releaseLevel = 0.0f;  // SLv/RLv: Bipolar start and release end levels
   float attack = 0.005f, decay = 0.4f, sustain = 0.6f, release = 0.4f;  // seconds / level
   float ac = 1.22051f, dc = 1.22051f, rc = 1.22051f;  // AC/DC/RC curve coefficients k (2 = linear)
+  float delay = 0.0f;  // Dly, seconds before the attack (the XML's 0..1 is 20 Dly^3 s)
+  float breakLevel = 0.0f, decay2 = 0.0f, sc = 1.22051f;  // Brk/D2/SC: AD only, D2 from Brk to 0
   float level = 1.0f;  // Levl, scales the envelope output
   float vTim = 0.0f, vLev = 0.0f;  // VTim/VLev: velocity scaling of times and level, -1..1
   int kCtr = 24;                   // KCtr: note where key scaling is neutral
@@ -493,6 +495,7 @@ template <class F> void forEachField(Patch& p, F&& f) {
     at(e.type, "%s.type", pre); at(e.startLevel, "%s.startLevel", pre); at(e.releaseLevel, "%s.releaseLevel", pre);
     at(e.attack, "%s.attack", pre); at(e.decay, "%s.decay", pre); at(e.sustain, "%s.sustain", pre);
     at(e.release, "%s.release", pre); at(e.ac, "%s.ac", pre); at(e.dc, "%s.dc", pre); at(e.rc, "%s.rc", pre);
+    at(e.delay, "%s.delay", pre); at(e.breakLevel, "%s.breakLevel", pre); at(e.decay2, "%s.decay2", pre); at(e.sc, "%s.sc", pre);
     at(e.level, "%s.level", pre); at(e.vTim, "%s.vTim", pre); at(e.vLev, "%s.vLev", pre);
     at(e.kCtr, "%s.kCtr", pre); at(e.kTim, "%s.kTim", pre); at(e.kLev, "%s.kLev", pre);
   };
@@ -576,12 +579,12 @@ template <class F> void forEachField(Patch& p, F&& f) {
 // and releases to RLv [I]: the default pitch envelope of 352 presets (SLv 0, S 1) must be neutral.
 // ---------------------------------------------------------------------------
 struct Envelope {
-  enum Stage { kIdle, kAttack, kDecay, kSustain, kRelease };
+  enum Stage { kIdle, kDelay, kAttack, kDecay, kDecay2, kSustain, kRelease };
   Stage stage = kIdle;
   float t = 0, y0 = 0, y1 = 0, value = 0;
 
   void noteOn(const EnvPatch& p) {
-    stage = kAttack; t = 0;
+    stage = p.delay > 0.0f ? kDelay : kAttack; t = 0;
     y0 = p.type == kEnvBipolar ? p.startLevel : value;
     y1 = p.type == kEnvBipolar ? 0.0f : 1.0f;
   }
@@ -604,17 +607,30 @@ struct Envelope {
     };
     switch (stage) {
       case kIdle: value = p.type == kEnvBipolar ? p.releaseLevel : 0.0f; break;
+      case kDelay: {  // holds where it was, then attacks from there
+        const float from = y0;
+        y1 = y0;
+        step(p.delay, 2.0f);
+        if (t >= 1.0f) { stage = kAttack; t = 0; y0 = from; y1 = p.type == kEnvBipolar ? 0.0f : 1.0f; }
+        break;
+      }
       case kAttack:
         step(p.attack, p.ac);
         if (t >= 1.0f && p.type == kEnvBipolar) { stage = kSustain; value = 0.0f; }
-        else if (t >= 1.0f) { stage = kDecay; t = 0; y0 = 1.0f; y1 = p.type == kEnvAD ? 0.0f : p.sustain; }
+        else if (t >= 1.0f) { stage = kDecay; t = 0; y0 = 1.0f; y1 = p.type == kEnvAD ? p.breakLevel : p.sustain; }
         break;
       case kDecay:
+        // AD falls to Brk over D and from there to 0 over D2 (measured in NS2); ADSR ignores both.
         step(p.decay, p.dc);
         if (t >= 1.0f) {
-          if (p.type == kEnvAD) { stage = kIdle; value = 0; }
+          if (p.type == kEnvAD && p.breakLevel > 0.0f) { stage = kDecay2; t = 0; y0 = p.breakLevel; y1 = 0.0f; }
+          else if (p.type == kEnvAD) { stage = kIdle; value = 0; }
           else { stage = kSustain; value = p.sustain; }
         }
+        break;
+      case kDecay2:
+        step(p.decay2, p.sc);
+        if (t >= 1.0f) { stage = kIdle; value = 0; }
         break;
       case kSustain: value = p.type == kEnvBipolar ? 0.0f : p.sustain; break;
       case kRelease:

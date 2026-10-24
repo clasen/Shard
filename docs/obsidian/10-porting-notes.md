@@ -485,7 +485,7 @@ missing: the 147/71 that flag it are tempo-synced delays played at 120 BPM.
 | Chorus / Ensemble / Flanger | 62 | 54 | |
 | ~~Sync~~, Pulse/Bi-Pulse | — / 45 | — / 25 | sync is implemented ([03](03-oscillators.md)) |
 | Per-oscillator phase offset | 45 | 58 | |
-| Envelope breakpoint and delay | 39 | 39 | |
+| ~~Envelope breakpoint and delay~~ | — | — | implemented ([05](05-envelopes-lfos.md)) |
 | Missing filter types (Formant, Lo-Fi, LP 6-D, Comb on F1/F2) | 50 | 23 | |
 | Macros to FX (Multi-FX Mix, Reverb Time) | 33 | 57 | |
 
@@ -640,6 +640,9 @@ Findings fixed with this:
   output and `Warp` bends the shape (the port had them swapped), Square's `SqCv`, Saw Double, FM
   and FM Sync (new), the randoms' glide and NS2's 16 Random Loop patterns. Dubstep Crush went
   from 3.2 to 1.9 dB of envelope difference and Arping On from 13.3 to 12.3.
+- Envelope delay and second decay, measured in NS2 ([05](05-envelopes-lfos.md)): `Dly` waits
+  `20·Dly³` seconds, AD falls to `Brk` over `D` and then to 0 over `D2` with the `SC` curve, and
+  ADSR ignores `Brk`/`D2` (78 factory envelopes carry them, mostly as leftover values).
 - Level reference: NS2's output level in these takes drifts between sessions (the saw test
   `zz01` came out at −22.6 dB against the port, not −5.6). Record a reference patch in the same
   session and compare against it, not against a fixed gain.

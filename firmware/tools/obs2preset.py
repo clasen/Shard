@@ -393,8 +393,11 @@ class Converter:
         self.emit(f"{q}.vTim = {f(num(e.get('VTim')))}; {q}.vLev = {f(num(e.get('VLev')))}; "
                   f"{q}.kCtr = {int(float(e.get('KCtr')))}; {q}.kTim = {f(num(e.get('KTim')))}; "
                   f"{q}.kLev = {f(num(e.get('KLev')))};")
-        for attr in ("Dly", "Brk", "D2"):
-            self.check_default(tag, e, attr, "0")
+        if num(e.get("Dly")) > 0:  # stored as x of 20 x^3 seconds, like the DSP's times (measured in NS2)
+            self.emit(f"{q}.delay = {f(20.0 * num(e.get('Dly')) ** 3)};")
+        if t == "AD" and num(e.get("Brk")) > 0:  # ADSR plays without Brk/D2 in NS2
+            self.emit(f"{q}.breakLevel = {f(num(e.get('Brk')))}; {q}.decay2 = {f(num(e.get('D2')))}; "
+                      f"{q}.sc = {f(num(e.get('SC')))};")
 
     def voice_params(self):
         v = self.voice

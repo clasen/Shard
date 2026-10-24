@@ -16,10 +16,14 @@ The FM connections (`FM/Con/Oxy/Env`) use the same format **[P]**.
 
 ### Types (`Type`)
 
-- `ADSR`: delay → attack → decay → (breakpoint → decay2) → sustain → release **[M][B][I]**.
+- `ADSR`: delay → attack → decay → sustain → release. `Brk` and `D2` do nothing here **[P]**: with
+  `Brk` 0.5 or 0.2, `D2` 0.8 and `S` 0.2 or 0.6, NS2 decays straight to `S` over `D` (tests `ze01`,
+  `ze03`).
 - `AD`: no sustain, typical for percussion **[M]**. In the factory drum presets the AD amplitude
   has `S` 1 and a short `R`, so the decay must go to 0 and not to `S` **[P][I]**. The port plays
-  it that way and ignores the note-off **[I]**.
+  it that way and ignores the note-off **[I]**. With `Brk` above 0 the decay is in two stages
+  **[P]** (test `ze09`): `D` falls from 1 to `Brk` with the `DC` curve, then `D2` from `Brk` to 0
+  with the `SC` curve. The x0x hi-hats use it (`D` 0.14 s to 0.05, then `D2` 25 ms).
 - `Bipolar`: the output goes from -1 to +1, typical for pitch **[M]**. It uses signed levels at
   the ends (`SLv`, `RLv`). The port's model **[P][I]**: it starts at `SLv`, the attack takes it to
   0, it stays at 0 (`D` and `S` are unused) and the release goes to `RLv`; all of it scaled by
@@ -37,11 +41,11 @@ The FM connections (`FM/Con/Oxy/Env`) use the same format **[P]**.
 
 | Attr | Internal | Observed range | UI format **[B]** | Notes |
 |---|---|---|---|---|
-| `Dly` | Delay | 0..1 s | time | Wait before the attack |
+| `Dly` | Delay | 0..1 | time | Wait before the attack, `20·Dly³` seconds: 0.3 waits 0.54 s in NS2 **[P]** (test `ze05`). Unlike the other times, the XML keeps it normalized |
 | `A` | Attack | 0..10 s | `cFormatTimeAttack` | |
 | `D` | Decay | 0..20 s | time | |
-| `Brk` | BreakPoint | 0..1 | % | Level where `D` ends and `D2` starts **[I]** |
-| `D2` | Decay2 | 0..2.5 s | time | Second decay, from `Brk` to `S` **[I]** |
+| `Brk` | BreakPoint | 0..1 | % | AD only: level where `D` ends and `D2` starts **[P]** |
+| `D2` | Decay2 | 0..2.5 s | time | AD only: second decay, from `Brk` to 0 **[P]** |
 | `S` | Sustain | 0..1 | % | |
 | `R` | Release | 0..8.5 s or `INF` | `cFormatTimeInf` | `INF` = the note does not end on its own |
 | `Levl` | Level | 0..1 | % | Output level (peak) |
@@ -49,7 +53,7 @@ The FM connections (`FM/Con/Oxy/Env`) use the same format **[P]**.
 | `RLv` | BiReleaseLevel | -1..1 | signed % | End level of the release in Bipolar **[I]** |
 | `AC` | AttackCurve | 1.03..33.3 | see below | |
 | `DC` | DecayCurve | 1.03..33.3 | | |
-| `SC` | Decay2Curve **[I]** | almost always 1.22051 | | |
+| `SC` | Decay2Curve | almost always 1.22051 | | The `D2` curve **[P]** |
 | `RC` | ReleaseCurve | 1.06..9.6 | | |
 | `VLev` | VelLevel | -1..1 | signed % | How much velocity scales the level |
 | `VTim` | VelTime | -1..1 | signed % | How much velocity scales the times |
