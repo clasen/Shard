@@ -226,14 +226,13 @@ in both USB modes the board acts as a BLE central (the core's `BLE` library, Blu
   - My own presets (0..6) start with a `Pitch Wheel → Osc All Pitch Coarse` slot of ±2
     semitones. Bend is no longer a special case in the engine.
 - **Full LFOs** (`cLFOSimple`, [05](05-envelopes-lfos.md#lfos-clfosimple)):
-  - Shapes: Sine (with `Crv`, over the sine table), Square, Triangle, Saw Up/Down, Saw Double
-    and Random (decompiled LCG).
-  - Random Loop repeats `RLen` steps from one seed per `RPtn`; NS2's patterns are **[?]**.
-  - `OutT`, `Warp`, `Qtz`, `Atk` (fade-in) and `PhOf`.
+  - All ten shapes as decompiled, each bent by `Warp`: Sine (over the sine table), Square (with
+    `SqCv`), Triangle, Saw Up/Down, Saw Double, FM, FM Sync, Random (decompiled LCG) and Random
+    Loop (NS2's 16 patterns).
+  - `OutT`, `Crv`, `Qtz`, `Atk` (fade-in) and `PhOf`.
   - Sync: OFF (random phase), KEY (`PhOf`) and GLOBAL (the engine LFO's phase stands in for the
     transport).
-  - Tempo-synced rates play at the engine's tempo (MIDI clock or `bpm`). FM and FM Sync are
-    missing.
+  - Tempo-synced rates play at the engine's tempo (MIDI clock or `bpm`).
 - **Global comb filter** (F3 `Comb Pos`/`Comb Neg`), stereo:
   - Decompiled algorithm ([04](04-filters.md#formant-waveshapers-and-lo-fi-b)).
   - Keytrack on the last note.
@@ -637,6 +636,10 @@ Findings fixed with this:
   from 4.4 dB loud to within 0.3 dB of NS2, and against the factory takes Plunk from 3.4 to 0 dB
   of gain error, Hardstyle Lead from 1.9 to 0 and Hang Drum from 0.9 to 0.2. The level
   modulation scale, `Lev + 2·m`, was confirmed on the way (`zu05`, `zu06`).
+- LFO shapes decompiled and measured ([05](05-envelopes-lfos.md)): `Crv` is the curve on the
+  output and `Warp` bends the shape (the port had them swapped), Square's `SqCv`, Saw Double, FM
+  and FM Sync (new), the randoms' glide and NS2's 16 Random Loop patterns. Dubstep Crush went
+  from 3.2 to 1.9 dB of envelope difference and Arping On from 13.3 to 12.3.
 - Level reference: NS2's output level in these takes drifts between sessions (the saw test
   `zz01` came out at −22.6 dB against the port, not −5.6). Record a reference patch in the same
   session and compare against it, not against a fixed gain.

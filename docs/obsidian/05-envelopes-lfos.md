@@ -165,7 +165,7 @@ higher than 0.
 | Type | Description **[M]** |
 |---|---|
 | `Sine` | Sine |
-| `Square` | Square (`SqCv` rounds it **[I]**) |
+| `Square` | Square (`SqCv` ramps its edges) |
 | `Triangle` | Triangle |
 | `Saw Up` / `Saw Down` | Saw |
 | `Saw Double` | Double saw; the second one can be shifted for swing |
@@ -188,9 +188,9 @@ All of them are shaped by `Crv` (curve), `Warp` and `Qtz` (quantize) **[M]**.
 | `Atk` | Attack | 0..25 s | **Linear** fade-in of the amplitude from note-on: `amp *= t/Atk` while `t < Atk` **[B]** |
 | `Ampl` | Ampl | 0..1 | Output amplitude |
 | `PhOf` | PhaseOffset | 0..1 | Start phase |
-| `Crv` | Curve | 0..1 | On the sine it is a phase skew (see below) **[B]**; on the other shapes, the breakpoint **[I]** |
-| `SqCv` | SqCurve | 0..1 | Square smoothing **[I]** |
-| `Warp` | Warp | 0..1 | Rational curve on the output, the same as the envelopes' with `k = 1/(0.03 + 0.94·Warp)`. 0.5 = neutral **[B]** |
+| `Crv` | Curve | 0..1 | Rational curve on the output, the same as the envelopes' with `k = 1/(0.03 + 0.94·Crv)`, 0.5 = neutral; the randoms' glide and the FM depth **[B][P]** |
+| `SqCv` | SqCurve | 0..1 | The square's edge ramps **[B][P]** |
+| `Warp` | Warp | 0..1 | Each shape's breakpoint (see below), 0.5 = the plain shape; the FM ratio **[B][P]** |
 | `Qtz` | Quantize | 0..9 (0 = OFF) | `y = floor(y·n + 0.5) / n`; not applied to Random Loop **[B]** |
 | `RPtn` | RandPattern | 1..16 | Seed or pattern of the Random Loop |
 | `RLen` | RandLoopLen | 2..16 | Length in steps of the Random Loop |
@@ -200,9 +200,28 @@ All of them are shaped by `Crv` (curve), `Warp` and `Qtz` (quantize) **[M]**.
 - **Rate with modulation**: `rate = clamp(Rt + 60·m³, 0, 60)`, with `m` the Rate modulation. The
   cube gives fine resolution near 0.
 - **Sine**: a 512-point table with linear interpolation (index = `|phase|·512/2π`).
-- **Curve on the sine**: warps the phase. With `c` = Curve (+mod):
-  `φ' = φ < c ? 0.5·φ/c : 0.5 + 0.5·(φ - c)/(1 - c)` and the output is `sin(2π·φ')`. With c = 0.5
-  it is the plain sine. Below 0.02 and above 0.98 there are special cases (half sine).
+- **`Crv` and `Warp`**: the patch struct follows the XML order (`PhOf` `Crv` `SqCv` `Warp` `Qtz` at
+  `+0x30`..`+0x40`), so `Crv` is the rational curve on the output and `Warp` bends the shape.
+  Earlier versions of these notes had them the other way round; NS2 takes of each shape settle it
+  **[P]** (`zl01`–`zl08`: Saw Up, Square, Triangle, FM, Random Loop and Sine within 0.02–0.05 of
+  the LFO's ±1 range, Saw Double within a 7 ms lag).
+- **Shapes, with `w` = Warp (+mod)**:
+  - Sine: `φ' = φ < w ? 0.5·φ/w : 0.5 + 0.5·(φ − w)/(1 − w)` and the output is `sin(2π·φ')`. At
+    `w` ≤ 0.02 it plays `−sin(π·φ)` and at ≥ 0.98 `sin(π·φ)`.
+  - Square: high until `a = 0.02 + 0.96·w`. With `SqCv` `q` > 0 the edges become ramps through
+    0 of `0.5·q·a` (and `0.5·q·(1 − a)` around the falling edge); in `UNI FULL` the ramps swing
+    the full −1..1.
+  - Triangle: peaks at `b = 0.01 + 0.48·w` and bottoms at `1 − b`.
+  - Saw Up: with `a = 0.02 + 0.96·w`, below 0.5 it rises from −1 to 1 by `2a` and holds; above,
+    it holds at −1 until `2a − 1` and rises to the end. Saw Down is its negative.
+  - Saw Double: falls from 1 to −1 by `d = 0.125 + 0.75·w`, then from 0.75 to −1.
+  - FM / FM Sync: `sin(2π·φ + (2 − 4·Crv)·sin(2π·m))`, the modulator `m` at `8·w²` times the
+    rate. FM keeps it running across periods; FM Sync restarts it every period.
+  - Random: new values at the start of every second period and at `0.125 + 0.75·Crv` through
+    the pair, so `Crv` 0.5 steps once per period.
+  - Random and Random Loop glide by `Crv` from the previous value to the next: at 0.5 they jump,
+    below it they glide over the first `0.96 − 1.92·Crv` of the step, above it they start
+    `1.92·Crv − 0.96` of the way and glide through the step.
 - **Jump table by type**, in enum order: 0 Sine, 1 Square, 2 Triangle, 3 Saw Up, 4 Saw Down (the
   same routine as Saw Up, negated), 5 Saw Double, 6 FM, 7 FM Sync (shares the FM routine),
   8 Random, 9 Random Loop.
@@ -211,13 +230,14 @@ All of them are shaped by `Crv` (curve), `Warp` and `Qtz` (quantize) **[M]**.
   Tempo: `RtBt 1`, `BRt 4` gives a period of one quarter note **[P]**: 480 ms in the NS2 project
   on the Mac, which runs at **125 BPM**. The port plays at 120 BPM because it has no transport.
   **One LFO period runs through the whole loop** **[P]**: each step lasts `period / RLen`.
-  Arping On (8/16 of a bar, `RLen` 8) restarts its envelope on sixteenth notes in NS2. The
-  pattern values are still **[?]**: the port uses the LCG with one seed per `RPtn`.
-- **Warp**: `y' = y / (y + (k−1)(1−y))` for `y ≥ 0`, symmetric for `y < 0`, with
-  `k = 1/clamp(0.03 + 0.94·Warp, 0.03, 0.97)`.
-  Warp only applies to Sine, Triangle, Saw Up/Down and Saw Double; Square, FM and Random skip
-  it.
-- **Processing order**: waveform → output type (`OutT`) → warp → quantize → amplitude (`Ampl` +
+  Arping On (8/16 of a bar, `RLen` 8) restarts its envelope on sixteenth notes in NS2. The 16
+  patterns are a fixed table at `0x1009c3e8c` (16 × 16 floats): step `k` plays from value `k` to
+  `k + 1` (wrapping at 16, not at `RLen`). The first 13 are random-looking, the last three are
+  ramps and steps; the port carries the table, and pattern 14 matches NS2 exactly **[P]**.
+- **Curve (`Crv`)**: `y' = y / (y + (k−1)(1−y))` for `y ≥ 0`, symmetric for `y < 0`, with
+  `k = 1/clamp(0.03 + 0.94·Crv, 0.03, 0.97)`.
+  It only applies to Sine, Triangle, Saw Up/Down and Saw Double; Square, FM and Random skip it.
+- **Processing order**: waveform → output type (`OutT`) → curve → quantize → amplitude (`Ampl` +
   mod, clamped to 0..1) → `Atk` fade-in.
 
 ### Per voice or global?

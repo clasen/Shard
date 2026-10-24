@@ -95,7 +95,7 @@ ENV_TYPES = {"ADSR": "kEnvADSR", "AD": "kEnvAD", "Bipolar": "kEnvBipolar"}
 VEL_SPLITS = {"Layer": "kVelLayer", "Split 2": "kVelSplit2", "Split 3": "kVelSplit3"}
 LFO_TYPES = {"Sine": "kLfoSine", "Square": "kLfoSquare", "Triangle": "kLfoTriangle", "Saw Up": "kLfoSawUp",
              "Saw Down": "kLfoSawDown", "Saw Double": "kLfoSawDouble", "Random": "kLfoRandom",
-             "Random Loop": "kLfoRandomLoop"}
+             "Random Loop": "kLfoRandomLoop", "FM": "kLfoFM", "FM Sync": "kLfoFMSync"}
 LFO_OUTS = {"BIPOLAR": "kLfoBipolar", "UNI HALF": "kLfoUniHalf", "UNI FULL": "kLfoUniFull"}
 LFO_SYNCS = {"OFF": "kLfoFree", "KEY": "kLfoKey", "GLOBAL": "kLfoGlobal"}
 
@@ -428,11 +428,9 @@ class Converter:
                   + f"{q}.ampl = {f(num(l.get('Ampl')))}; {q}.type = {LFO_TYPES.get(t, 'kLfoSine')}; "
                   f"{q}.out = {LFO_OUTS.get(l.get('OutT'), 'kLfoBipolar')}; {q}.sync = {LFO_SYNCS.get(sync, 'kLfoFree')};")
         self.emit(f"{q}.phaseOffset = {f(num(l.get('PhOf')))}; {q}.attack = {f(num(l.get('Atk')))}; "
-                  f"{q}.curve = {f(num(l.get('Crv')))}; {q}.warp = {f(num(l.get('Warp')))}; "
+                  f"{q}.curve = {f(num(l.get('Crv')))}; {q}.squareCurve = {f(num(l.get('SqCv')))}; {q}.warp = {f(num(l.get('Warp')))}; "
                   f"{q}.quantize = {int(float(l.get('Qtz')))}; {q}.loopPattern = {int(float(l.get('RPtn')))}; "
                   f"{q}.loopLength = {int(float(l.get('RLen')))};")
-        if t not in ("Sine",) and num(l.get("Crv")) != 0.5 and t in LFO_TYPES:
-            self.unsupported(where, f"Crv={l.get('Crv')} only shapes the sine")
 
     def destinations(self, dest, par):
         """[(ModDest, index)] of a Dest/DstP pair; empty when the engine has no such parameter."""

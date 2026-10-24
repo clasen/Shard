@@ -41,7 +41,8 @@ constexpr int kSyncWindowLen = 256;  // half of ANALOG sync's window, 0 at the r
 enum EnvType { kEnvADSR, kEnvAD, kEnvBipolar };
 // Filt/Rout, in NS2's enum order (0x1004036c0): PARALLEL, SERIES, STEREO (F2 runs F1's settings).
 enum FilterRoute { kRouteParallel, kRouteSeries, kRouteStereo };
-enum LfoType { kLfoSine, kLfoSquare, kLfoTriangle, kLfoSawUp, kLfoSawDown, kLfoSawDouble, kLfoRandom, kLfoRandomLoop };
+enum LfoType { kLfoSine, kLfoSquare, kLfoTriangle, kLfoSawUp, kLfoSawDown, kLfoSawDouble, kLfoRandom, kLfoRandomLoop,
+               kLfoFM, kLfoFMSync };
 enum LfoOut { kLfoBipolar, kLfoUniHalf, kLfoUniFull };
 enum LfoSync { kLfoFree, kLfoKey, kLfoGlobal };
 constexpr int kLfos = 5;
@@ -334,8 +335,9 @@ struct LfoPatch {
   LfoSync sync = kLfoFree;   // Sync: OFF (random phase per note), KEY (PhOf), GLOBAL (shared phase)
   float phaseOffset = 0.0f;  // PhOf
   float attack = 0.0f;       // Atk: linear fade-in from the note-on, seconds
-  float curve = 0.5f;        // Crv: phase bias of the sine
-  float warp = 0.5f;         // Warp: 0.5 = neutral
+  float curve = 0.5f;        // Crv: rational curve on the output, 0.5 = neutral
+  float squareCurve = 0.0f;  // SqCv: the square's edge slope
+  float warp = 0.5f;         // Warp: each shape's breakpoint, the FM ratio and depth, the random glide
   int quantize = 0;          // Qtz: steps, 0 = off
   int loopPattern = 1, loopLength = 16;  // RPtn/RLen (Random Loop)
 };
@@ -535,7 +537,7 @@ template <class F> void forEachField(Patch& p, F&& f) {
     LfoPatch& l = p.lfo[i];
     at(l.rate, "lfo[%d].rate", i); at(l.beats, "lfo[%d].beats", i); at(l.ampl, "lfo[%d].ampl", i); at(l.type, "lfo[%d].type", i);
     at(l.out, "lfo[%d].out", i); at(l.sync, "lfo[%d].sync", i); at(l.phaseOffset, "lfo[%d].phaseOffset", i);
-    at(l.attack, "lfo[%d].attack", i); at(l.curve, "lfo[%d].curve", i); at(l.warp, "lfo[%d].warp", i);
+    at(l.attack, "lfo[%d].attack", i); at(l.curve, "lfo[%d].curve", i); at(l.squareCurve, "lfo[%d].squareCurve", i); at(l.warp, "lfo[%d].warp", i);
     at(l.quantize, "lfo[%d].quantize", i); at(l.loopPattern, "lfo[%d].loopPattern", i);
     at(l.loopLength, "lfo[%d].loopLength", i);
   }
@@ -1072,20 +1074,21 @@ struct SamplePlayer {
 };
 
 // ---------------------------------------------------------------------------
-// LFO (cLFOSimple, 05-envelopes-lfos.md): shape -> OutT -> Warp -> Qtz -> Ampl -> Atk fade-in.
-// Square and Random skip the warp. Saw Double and the Random Loop patterns are [?].
+// LFO (cLFOSimple, 0x100560ccc, 05-envelopes-lfos.md): shape -> OutT -> Crv -> Qtz -> Ampl -> Atk
+// fade-in. Warp moves each shape's breakpoint; Square, FM and the randoms skip the curve.
 // ---------------------------------------------------------------------------
 struct Lfo {
   float phase = 0, time = 0;
-  uint32_t rnd = 1, seed = 1;
-  float held = 0;
-  int step = 0;
+  uint32_t rnd = 1;
+  int cycles = 0;               // completed periods: the FM modulator's phase and Random's pairs
+  float from = 0, to = 0;       // Random: the value it glides from and the one it heads to
+  float half = 0;               // Random: last position in its two-period cycle
 
   static float uniform(float v) { return (float)(esp_random() >> 8) * (1.0f / 16777216.0f) * v; }
 
-  void nextRandom() {
+  float nextRandom() {
     rnd = (rnd * 31415821u + 1u) & 0x3FFFFFFFu;
-    held = (float)rnd * (2.0f / 1073741824.0f) - 1.0f;
+    return (float)rnd * (2.0f / 1073741824.0f) - 1.0f;
   }
 
   // Note-on (or engine start): Sync=KEY restarts at PhOf, Sync=OFF takes a random phase and
@@ -1093,40 +1096,113 @@ struct Lfo {
   void start(const LfoPatch& p, float sharedPhase) {
     time = 0;
     phase = p.sync == kLfoKey ? fminf(p.phaseOffset, 0.999f) : (p.sync == kLfoGlobal ? sharedPhase : uniform(0.999f));
-    seed = 0x9E3779B1u * (uint32_t)p.loopPattern;
-    rnd = p.type == kLfoRandomLoop ? seed : (esp_random() & 0x3FFFFFFFu);
-    step = -1;
-    if (p.type == kLfoRandomLoop) catchUp(p);
-    else nextRandom();
+    cycles = 0;
+    rnd = esp_random() & 0x3FFFFFFFu;
+    from = nextRandom();
+    to = nextRandom();
+    half = 0.5f * phase;
   }
 
-  // Random Loop plays its whole loop in one period, RLen steps of period / RLen each [I]: Arping
-  // On (8/16 bar, RLen 8) retriggers on 1/16 notes in NS2.
-  void catchUp(const LfoPatch& p) {
-    const int n = p.loopLength > 1 ? p.loopLength : 1;
-    const int s = (int)(phase * (float)n);
-    while (step < s) { step++; nextRandom(); }
+  // The random shapes' Crv: 0.5 jumps to the next value; below it glides there over the first
+  // 0.96 - 1.92c of the step, above it starts 1.92c - 0.96 of the way and glides through the step.
+  static float glide(float a, float b, float u, float c) {
+    const float k = 0.96f * c - 0.48f;
+    if (fabsf(k) < 0.01f) return b;
+    if (k > 0.0f) return a + (b - a) * (1.0f - 2.0f * k + 2.0f * k * u);
+    const float w = 0.96f - 1.92f * c;
+    return u < w ? a + (b - a) * u / w : b;
   }
 
-  float shape(const LfoPatch& p) const {
-    const float ph = phase;
+  static float sine(float x) {  // sin(2 pi x) from the wave bank's sine (NS2 uses a 512-point table)
+    x -= floorf(x);
+    const int16_t* t = gBank->table[kSine][0];
+    const float f = x * kTableLen;
+    int i = (int)f;
+    if (i >= kTableLen) i = kTableLen - 1;
+    return (t[i] + (t[i + 1] - t[i]) * (f - (float)i)) * (1.0f / 32767.0f);
+  }
+
+  float shape(const LfoPatch& p) {
+    const float ph = phase, c = Noise::clamp01(p.warp), cv = Noise::clamp01(p.curve);
     switch (p.type) {
-      case kLfoSquare: return ph < 0.5f ? 1.0f : -1.0f;
-      case kLfoTriangle: return ph < 0.25f ? 4.0f * ph : (ph < 0.75f ? 2.0f - 4.0f * ph : 4.0f * ph - 4.0f);
-      case kLfoSawUp: return 2.0f * ph - 1.0f;
-      case kLfoSawDown: return 1.0f - 2.0f * ph;
-      case kLfoSawDouble: { float h = 2.0f * ph; return 2.0f * (h - floorf(h)) - 1.0f; }
-      case kLfoRandom:
-      case kLfoRandomLoop: return held;
+      case kLfoSquare: {
+        // Width 0.02..0.98; SqCv turns the edges into ramps through 0 (full swings in UNI FULL).
+        const float a = 0.96f * c + 0.02f, q = Noise::clamp01(p.squareCurve);
+        if (q <= 0.0f) return ph < a ? 1.0f : -1.0f;
+        const float w = 0.5f * q * a;
+        if (p.out == kLfoUniFull) {
+          if (ph < w) return 2.0f * ph / w - 1.0f;
+          if (ph < a - w) return 1.0f;
+          return ph < a ? 2.0f * (a - ph - w) / w + 1.0f : -1.0f;
+        }
+        const float w2 = 0.5f * q * (1.0f - a);
+        if (ph < w) return ph / w;
+        if (ph < a - w) return 1.0f;
+        if (ph < a) return (a - ph) / w;
+        if (ph < a + w2) return (a - ph) / w2;
+        return ph < 1.0f - w2 ? -1.0f : (ph - 1.0f + w2) / w2 - 1.0f;
+      }
+      case kLfoTriangle: {
+        const float b = 0.48f * c + 0.01f;
+        if (ph < b) return ph / b;
+        return ph < 1.0f - b ? 2.0f * (b - ph) / (1.0f - 2.0f * b) + 1.0f : (ph - 1.0f + b) / b - 1.0f;
+      }
+      case kLfoSawUp:
+      case kLfoSawDown: {
+        // Rises from -1 to 1 by 2a and holds there (a < 0.5), or holds at -1 until 2a - 1.
+        const float a = 0.96f * c + 0.02f;
+        float y;
+        if (a < 0.5f) y = ph < 2.0f * a ? ph / a - 1.0f : 1.0f;
+        else y = ph < 2.0f * a - 1.0f ? -1.0f : (ph - 2.0f * a + 1.0f) / (1.0f - a) - 1.0f;
+        return p.type == kLfoSawDown ? -y : y;
+      }
+      case kLfoSawDouble: {  // falls from 1 to -1 by d, then from 0.75 to -1
+        const float d = 0.75f * c + 0.125f;
+        return ph < d ? 1.0f - 2.0f * ph / d : 0.75f - 1.75f * (ph - d) / (1.0f - d);
+      }
+      case kLfoFM:
+      case kLfoFMSync: {
+        // A sine whose phase a second sine bends by 2 - 4 Crv, at 8 Warp^2 times the rate; FM Sync
+        // restarts the modulator every period.
+        const float m = 8.0f * c * c * (p.type == kLfoFM ? (float)cycles + ph : ph);
+        return sine(ph + (2.0f - 4.0f * cv) * sine(m) * (1.0f / 6.28318531f));
+      }
+      case kLfoRandom: {
+        // Runs over two periods: a new value at the start and at 0.125 + 0.75 Crv of them.
+        const float d = 0.75f * cv + 0.125f, h = 0.5f * ph + ((cycles & 1) ? 0.5f : 0.0f);
+        if ((h >= d && half < d) || h < half) { from = to; to = nextRandom(); }
+        half = h;
+        return glide(from, to, h < d ? h / d : (h - d) / (0.875f - 0.75f * cv), cv);
+      }
+      case kLfoRandomLoop: {
+        // NS2's 16 fixed patterns of 16 steps; one period plays RLen of them.
+        static constexpr float kLoops[16][16] = {
+            {-1.0f, -0.941f, -0.216f, 0.142f, -0.151f, -0.817f, 0.782f, 0.918f, 0.109f, 0.794f, 0.969f, -0.066f, -0.543f, 0.514f, 0.614f, 0.485f},
+            {-0.344f, 0.999f, 0.436f, 0.693f, 0.611f, -0.304f, 0.784f, -0.526f, -0.243f, 0.624f, -0.602f, -0.122f, 0.524f, -0.339f, -0.894f, -0.343f},
+            {0.313f, 0.939f, -0.912f, -0.756f, -0.627f, 0.209f, 0.786f, 0.029f, -0.595f, 0.454f, -0.173f, -0.177f, -0.41f, 0.807f, -0.403f, 0.83f},
+            {0.969f, 0.879f, -0.259f, -0.205f, 0.135f, 0.722f, 0.788f, 0.585f, -0.947f, 0.285f, 0.257f, -0.232f, 0.656f, -0.047f, 0.089f, 0.003f},
+            {-0.375f, 0.819f, 0.393f, 0.346f, 0.897f, -0.765f, 0.79f, -0.859f, 0.701f, 0.115f, 0.686f, -0.288f, -0.278f, -0.901f, 0.581f, -0.825f},
+            {0.282f, 0.759f, -0.954f, 0.897f, -0.341f, -0.252f, 0.792f, -0.304f, 0.349f, -0.055f, -0.885f, -0.343f, 0.788f, 0.246f, -0.928f, 0.348f},
+            {0.938f, 0.699f, -0.302f, -0.552f, 0.421f, 0.261f, 0.794f, 0.252f, -0.003f, -0.225f, -0.456f, -0.398f, -0.145f, -0.608f, -0.436f, -0.48f},
+            {-0.406f, 0.639f, 0.351f, -0.001f, -0.818f, 0.775f, 0.797f, 0.808f, -0.355f, -0.394f, -0.027f, -0.453f, 0.921f, 0.538f, 0.056f, 0.693f},
+            {0.251f, 0.579f, -0.997f, 0.55f, -0.056f, -0.712f, 0.799f, -0.637f, -0.708f, -0.564f, 0.402f, -0.509f, -0.013f, -0.316f, 0.548f, -0.135f},
+            {0.907f, 0.519f, -0.345f, -0.899f, 0.706f, -0.199f, 0.801f, -0.081f, 0.94f, -0.734f, 0.831f, -0.564f, -0.947f, 0.831f, -0.961f, -0.962f},
+            {-0.437f, 0.459f, 0.308f, -0.348f, -0.532f, 0.314f, 0.803f, 0.475f, 0.588f, -0.904f, -0.74f, -0.619f, 0.119f, -0.023f, -0.469f, 0.21f},
+            {0.22f, 0.399f, 0.96f, 0.203f, 0.23f, 0.827f, 0.805f, -0.97f, 0.236f, 0.927f, -0.31f, -0.674f, -0.815f, -0.877f, 0.023f, -0.617f},
+            {0.876f, 0.339f, -0.387f, 0.754f, 0.992f, -0.66f, 0.807f, -0.414f, -0.116f, 0.757f, 0.119f, -0.73f, 0.252f, 0.269f, 0.515f, 0.555f},
+            {0.0f, 0.25f, 0.5f, 0.75f, 1.0f, 0.0f, 0.25f, 0.0f, -0.5f, 0.0f, 0.0f, -0.75f, 0.25f, 0.5f, 0.0f, -1.0f},
+            {0.0f, 0.25f, 0.0f, 0.375f, 0.0f, -0.5f, 0.0f, -0.625f, 0.0f, 0.75f, 0.0f, 0.875f, 0.0f, 1.0f, 0.0f, -0.125f},
+            {0.0f, 1.0f, 0.0f, 0.75f, 0.0f, 0.5f, 0.0f, 0.25f, 0.0f, -0.25f, 0.0f, -0.5f, 0.0f, -0.75f, 0.0f, -1.0f},
+        };
+        const int n = p.loopLength > 1 ? p.loopLength : 1, row = (p.loopPattern - 1) & 15;
+        const float x = ph * (float)n;
+        const int k = (int)x;
+        return glide(kLoops[row][k & 15], kLoops[row][(k + 1) & 15], x - (float)k, cv);
+      }
       default: {
-        const float c = p.curve < 0.02f ? 0.02f : (p.curve > 0.98f ? 0.98f : p.curve);
-        const float b = ph < c ? 0.5f * ph / c : 0.5f + 0.5f * (ph - c) / (1.0f - c);
-        // The sine mip of the wave bank, linearly interpolated (NS2 uses a 512-point table).
-        const int16_t* t = gBank->table[kSine][0];
-        const float x = b * kTableLen;
-        int i = (int)x;
-        if (i >= kTableLen) i = kTableLen - 1;
-        return (t[i] + (t[i + 1] - t[i]) * (x - (float)i)) * (1.0f / 32767.0f);
+        if (c <= 0.02f) return -sine(0.5f * ph);  // the extremes play half a sine
+        if (c >= 0.98f) return sine(0.5f * ph);
+        return sine(ph < c ? 0.5f * ph / c : 0.5f + 0.5f * (ph - c) / (1.0f - c));
       }
     }
   }
@@ -1137,8 +1213,9 @@ struct Lfo {
     float y = shape(p);
     if (p.out == kLfoUniHalf) y = y > 0.0f ? y : 0.0f;
     else if (p.out == kLfoUniFull) y = 0.5f * y + 0.5f;
-    if (p.type != kLfoSquare && p.type != kLfoRandom && p.type != kLfoRandomLoop && p.warp != 0.5f) {
-      float w = 0.03f + 0.94f * p.warp;
+    const bool curved = p.type <= kLfoSawDouble && p.type != kLfoSquare;
+    if (curved && p.curve != 0.5f) {
+      float w = 0.03f + 0.94f * p.curve;
       w = w < 0.03f ? 0.03f : (w > 0.97f ? 0.97f : w);
       const float k = 1.0f / w, a = fabsf(y), t = a / (a + (k - 1.0f) * (1.0f - a));
       y = y < 0.0f ? -t : t;
@@ -1151,12 +1228,9 @@ struct Lfo {
     rate = rate < 0.0f ? 0.0f : (rate > 60.0f ? 60.0f : rate);
     phase += rate * dt;
     time += dt;
-    if (p.type == kLfoRandomLoop) {
-      if (phase >= 1.0f) { phase -= floorf(phase); rnd = seed; step = -1; }
-      catchUp(p);
-    } else if (phase >= 1.0f) {
+    if (phase >= 1.0f) {
+      cycles += (int)phase;
       phase -= floorf(phase);
-      nextRandom();
     }
     return y * amp;
   }
