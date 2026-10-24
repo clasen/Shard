@@ -2692,28 +2692,41 @@ struct Engine {
   struct Limiter {
     static constexpr float kCeiling = 0.89f;                      // -1 dBFS
     static constexpr float kRelease = 1.0f - 0.98348f;            // 1 - exp(-block / 80 ms)
-    float l[kBlock] = {}, r[kBlock] = {};
-    float need = 1.0f, g = 1.0f;  // gain the delayed block needs; gain at the end of the last block
+    // Lookahead in blocks (5.3 ms): a chord's gain reduction ramps in over this long instead of one
+    // block, where it clicked at full volume (up to 5 dB within 1 ms).
+    static constexpr int kAhead = 4;
+    float l[kAhead][kBlock] = {}, r[kAhead][kBlock] = {};
+    float need[kAhead] = {1.0f, 1.0f, 1.0f, 1.0f};  // the gain each delayed block needs
+    float g = 1.0f;  // gain at the end of the last block
+    int head = 0;    // the oldest delayed block, the one that plays next
 
     void process(float* L, float* R) {
-      float next = 1.0f;
-      for (int n = 0; n < kBlock; n++) {
-        const float peak = fmaxf(fabsf(L[n]), fabsf(R[n]));
-        if (peak * next > kCeiling) next = kCeiling / peak;
+      float peak = 0.0f;
+      for (int n = 0; n < kBlock; n++) peak = fmaxf(peak, fmaxf(fabsf(L[n]), fabsf(R[n])));
+      // The new block replaces the oldest, which is copied out to play now.
+      float dl[kBlock], dr[kBlock];
+      memcpy(dl, l[head], sizeof(dl));
+      memcpy(dr, r[head], sizeof(dr));
+      const float now = need[head];
+      memcpy(l[head], L, sizeof(dl));
+      memcpy(r[head], R, sizeof(dr));
+      need[head] = peak > kCeiling ? kCeiling / peak : 1.0f;
+      head = head == kAhead - 1 ? 0 : head + 1;
+      // Ramp linearly so the gain is under every coming block's need by the time it plays, or
+      // release towards 1.
+      float end = now;
+      for (int j = 1; j <= kAhead; j++) {
+        const float nj = need[(head + j - 1) % kAhead];
+        end = fminf(end, g + (nj - g) / (float)j);
       }
-      const float target = fminf(need, next);
-      const float end = target < g ? target : g + (target - g) * kRelease;
+      if (end > g) end = g + (fminf(end, 1.0f) - g) * kRelease;
       const float step = (end - g) * (1.0f / kBlock);
       float a = g;
       for (int n = 0; n < kBlock; n++, a += step) {
-        const float dl = l[n], dr = r[n];
-        l[n] = L[n];
-        r[n] = R[n];
-        L[n] = dl * a;
-        R[n] = dr * a;
+        L[n] = dl[n] * a;
+        R[n] = dr[n] * a;
       }
       g = end;
-      need = next;
     }
   };
   Limiter limiter;
