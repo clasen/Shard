@@ -28,7 +28,7 @@ Methods:
 | 13 | ~~Unison~~ **Solved**: detune, pan and level tables by voice count ([02](02-preset-format.md#unison-b)) | D | `cUnisonVoice`, `0x100559afc` |
 | 14 | Glide: exponential in pitch? Constant time or per interval? | D, R | `cSynthVoice` |
 | 15 | Exact `FMix` and `Ring` | D | `cSynthOsc` |
-| 16 | `STEREO` routing: how are the mono oscillators split? | D | `cFilters` |
+| 16 | ~~`STEREO` routing~~ **Solved** by measurement: `(1 − Pan)` left, `Pan` right, ×2 after the filters ([01](01-architecture.md#filter-routing-rout-mp)) | — | `0x1005a6498` |
 | 17 | ~~Reverb algorithms~~ **Solved**: Freeverb (16 combs) + Dattorro plate ([07](07-effects.md#topology-b)). Which `Algo` uses each engine is missing | D | `0x1001907cc`, `0x1002b0ab8` |
 | 18 | Multi-FX: type mapping **solved** ([07](07-effects.md)). The internal delay/LFO ranges per mode are missing | D | `0x1002d1a20`, `0x100249b18` |
 | 19 | ~~Layers `LL1..LX2`~~ **Solved** ([03](03-oscillators.md#velocity-layers-and-splits-osc--cosctriple-b)). Still to confirm that `v = vel/127` and the UI's `VEL` | D | `0x1005a6178` |

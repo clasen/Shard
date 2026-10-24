@@ -72,6 +72,7 @@ enum ModDest : int8_t {
   kDstNsDetune = kDstFmRatio + 3, kDstNsMix, kDstPdDist,  // NanoSaw Detune/Mix, PD Phase Dist
   kDstPulseWidth,                      // An Pulse Width
   kDstSyncRatio, kDstSyncHardness,     // An Sync Ratio, An Sync Hardness
+  kDstOscPan,                          // Pan (STEREO routing only)
   kDstOscPhase,                        // Phase: shifts the running oscillator, 1 = a full cycle
   kDstCutoff, kDstCutoffSlow, kDstQ, kDstFilterGain, kDstDrive,
   kDstAmpGain,
@@ -284,6 +285,7 @@ struct OscPatch {
   float fine = 0.0f;   // Dtn, semitones
   float level = 0.6f;  // Lev, linear 0..2
   float filterMix = 0.0f;  // FMix: share of the oscillator sent to the F2 bus instead of F1
+  float pan = 0.5f;        // Pan: with STEREO routing, the share sent to the right channel's filter
   float phaseOffset = 0.0f;  // POff: the phase each note starts at, in cycles
   float pulseWidth = 0.5f;   // PWM (Analog Pulse)
   OscSync sync = kSyncOff;   // Analog Sync, with SRat and SShp
@@ -500,7 +502,7 @@ template <class F> void forEachField(Patch& p, F&& f) {
     at(o.phaseOffset, "osc[%d].phaseOffset", i); at(o.pulseWidth, "osc[%d].pulseWidth", i);
     at(o.sync, "osc[%d].sync", i); at(o.syncRatio, "osc[%d].syncRatio", i); at(o.syncShape, "osc[%d].syncShape", i);
     at(o.transpose, "osc[%d].transpose", i); at(o.fine, "osc[%d].fine", i); at(o.level, "osc[%d].level", i);
-    at(o.filterMix, "osc[%d].filterMix", i); at(o.noiseType, "osc[%d].noiseType", i);
+    at(o.filterMix, "osc[%d].filterMix", i); at(o.pan, "osc[%d].pan", i); at(o.noiseType, "osc[%d].noiseType", i);
     at(o.noiseCut, "osc[%d].noiseCut", i); at(o.noiseQ, "osc[%d].noiseQ", i); at(o.noiseDeci, "osc[%d].noiseDeci", i);
     at(o.zoneCount, "osc[%d].zoneCount", i);
     at(o.nsMix, "osc[%d].nsMix", i); at(o.nsFalloff, "osc[%d].nsFalloff", i);
@@ -1513,6 +1515,7 @@ struct Voice {
   bool shed = false;   // dropped for CPU: fades to silence over its next block, then goes idle
   float retrigPrev[kEnvs] = {};  // last block's Retrigger input per envelope
   float gainL = 1, gainR = 1;  // unison pan and level
+  float uniPan = 0;            // unison pan offset; with STEREO routing it moves the oscillators' Pan
   float oscGain[3] = {1, 1, 1};  // velocity layer/split gains (velocityGains)
   float posPrev[3] = {-1, -1, -1};  // wavetable position at the end of the previous block
   float levPrev[3] = {-1, -1, -1};  // oscillator level at the end of the previous block
@@ -1551,7 +1554,7 @@ struct Voice {
       // state would start the note with a click.
       filter = Filter(); filter2 = Filter();
       if (Filter::comb(p.filterType)) comb[0].clear();
-      if (Filter::comb(p.f2.type)) comb[1].clear();
+      if (Filter::comb(p.f2.type) || (p.route == kRouteStereo && Filter::comb(p.filterType))) comb[1].clear();
     }
     // Each note starts at POff: in NS2 two saws a half cycle apart cancel their odd harmonics.
     for (int i = 0; i < 3; i++) {
@@ -1651,6 +1654,20 @@ struct Voice {
     filter.set(p.filterType, cutHz, res, p.shelfGain, Noise::clamp01(p.drive + vm[kDstDrive - kDstCutoff]), cutNorm, p.vowel);
     combHz[0] = cutHz; combQ[0] = res;
     const bool split = p.route != kRouteStereo, useF2 = split && p.f2.enabled;
+    // STEREO runs F1's settings on a left and a right bus: each oscillator goes (1 - Pan) to the left
+    // and Pan to the right, and both filter outputs are doubled. Measured in NS2: a centred
+    // oscillator saturates a driven ladder like half its level, FMix does nothing here, and Pan
+    // does nothing with the other routings. Unpanned, one filter at half level feeds both sides.
+    bool panned = false;
+    if (!split) {
+      panned = uniPan != 0.0f;
+      for (int i = 0; i < 3; i++) panned |= p.osc[i].enabled && p.osc[i].pan != 0.5f;
+      for (const ModSlot& m : p.mod) panned |= m.src != kSrcNone && m.dest == kDstOscPan;
+    }
+    if (panned) {
+      filter2.set(p.filterType, cutHz, res, p.shelfGain, Noise::clamp01(p.drive + vm[kDstDrive - kDstCutoff]), cutNorm, p.vowel);
+      combHz[1] = cutHz; combQ[1] = res;
+    }
     if (useF2) {
       const float cut2 = p.f2.cutoff + p.f2.envAmt * src[kSrcEnv1 + 1] + vm[kDstCutoff2 - kDstCutoff] + slowCut;
       const float hz2 = 20.0f * exp2f(9.81378f * cut2) * powf(noteHz / 130.8128f, p.f2.keyTrack);
@@ -1791,7 +1808,7 @@ struct Voice {
     // skips the filters. In STEREO, F2 runs F1's settings, so both buses go through F1.
     float bus1[kBlock], bus2[kBlock], bypass[kBlock];
     memset(bus1, 0, sizeof(bus1));
-    if (split) memset(bus2, 0, sizeof(bus2));
+    if (split || panned) memset(bus2, 0, sizeof(bus2));
     const bool bypass1 = p.osc1Bypass && run[0];
     if (bypass1) memset(bypass, 0, sizeof(bypass));
     for (int i = 0; i < 3; i++) {
@@ -1801,18 +1818,22 @@ struct Voice {
       levPrev[i] = lev[i];
       if (!run[i] || (lev[i] == 0.0f && l == 0.0f)) continue;
       float* to = i == 0 && bypass1 ? bypass : bus1;
-      const float f = split && to == bus1 ? p.osc[i].filterMix : 0.0f;
+      float w2 = 0.0f;  // the share sent to the F2 bus (or the right side), the rest to `to`
+      if (to == bus1 && split) w2 = p.osc[i].filterMix;
+      else if (to == bus1 && panned) w2 = Noise::clamp01(p.osc[i].pan + uniPan + om[i][kDstOscPan]);
+      const float w1 = !split && to == bus1 && !panned ? 0.5f : 1.0f - w2;
       const bool ringed = i > 0 && ring[i] > 0.0f && run[i - 1];
       for (int n = 0; n < kBlock; n++, l += lStep) {
         const float x = (ringed ? raw[i][n] * ((1.0f - ring[i]) + ring[i] * raw[i - 1][n]) : raw[i][n]) * l;
-        to[n] += x * (1.0f - f);
-        if (f != 0.0f) bus2[n] += x * f;
+        to[n] += x * w1;
+        if (w2 != 0.0f) bus2[n] += x * w2;
       }
     }
 
     // Filter outputs: the gains include OGn and the voice convention of half level into the ladder.
     const float g1 = 0.5f * fmaxf(p.filterGain + 2.0f * vm[kDstFilterGain - kDstCutoff], 0.0f);
     runFilter(0, filter, p.filterType, p.combMix, bus1, g1);
+    if (panned) runFilter(1, filter2, p.filterType, p.combMix, bus2, g1);
     // SERIES adds F1's output to the F2 bus; a disabled F2 passes its bus through.
     const bool series = p.route == kRouteSeries;
     if (useF2) {
@@ -1827,9 +1848,10 @@ struct Voice {
     // NS2 with it.
     auto panL = [](float x) { return x < 0.5f ? 1.0f : 2.0f * (1.0f - x); };
     auto panR = [](float x) { return x > 0.5f ? 1.0f : 2.0f * x; };
-    const float l1 = gainL * panL(p1), r1 = gainR * panR(p1), l2 = gainL * panL(p2), r2 = gainR * panR(p2);
+    const float st = split ? 1.0f : 2.0f;
+    const float l1 = st * gainL * panL(p1), r1 = st * gainR * panR(p1), l2 = gainL * panL(p2), r2 = gainR * panR(p2);
     for (int n = 0; n < kBlock; n++) {
-      float yl = bus1[n] * l1, yr = bus1[n] * r1;
+      float yl = bus1[n] * l1, yr = (panned ? bus2[n] : bus1[n]) * r1;
       if (split) { yl += bus2[n] * l2; yr += bus2[n] * r2; }
       if (bypass1) { yl += 0.5f * bypass[n] * gainL; yr += 0.5f * bypass[n] * gainR; }
       outL[n] += yl * a;
@@ -2018,8 +2040,9 @@ struct Delay {
   // In place on the stereo mix, as measured against NS2 renders (07-effects.md) [P]: the dry signal
   // stays at 1 and the echoes come in at 1.1 * Mix^2 (+ the Delay Mix modulation). Stereo keeps
   // each channel on its own line.
-  // Cross and Pingpong feed the left line (DTim) only and bounce every echo to the right line
-  // (DTim / N), so 1:2 at 250 ms echoes at 250, 375, 625, 750 ms...
+  // Cross and Pingpong feed each channel into its own line, the left of DTim and the right of
+  // DTim / N, and send all of the feedback across: a centred note echoes on both sides, and 1:2 at
+  // 250 ms echoes on the left at 250, 375, 625, 750 ms...
   void process(const DelayPatch& p, float mixMod, float* xl, float* xr) {
     const int maxD = l.len - 1;
     const bool cross = p.type != kDelayStereo;
@@ -2042,8 +2065,8 @@ struct Delay {
       wl -= k * (cutHighs ? wl - lpL : lpL);
       wr -= k * (cutHighs ? wr - lpR : lpR);
       if (cross) {
-        l.push(xl[n] + xr[n] + fb * wr);
-        r.push(fb * wl);
+        l.push(xl[n] + fb * wr);
+        r.push(xr[n] + fb * wl);
       } else {
         l.push(xl[n] + fb * wl);
         r.push(xr[n] + fb * wr);
@@ -2363,13 +2386,15 @@ struct Engine {
     static const float kPan[5][4] = {{0}, {0}, {-0.5f, 0.5f}, {-0.5f, 0, 0.5f}, {-0.5f, 0.25f, -0.25f, 0.5f}};
     float d = Noise::clamp01(patch.unisonDetune);
     v.detune = kDet[n][u] * d * d * (1.0f + 0.2f * n);
-    float pan = Noise::clamp01(0.5f + kPan[n][u] * Noise::clamp01(patch.unisonStereo));
+    v.uniPan = kPan[n][u] * Noise::clamp01(patch.unisonStereo);
     // The level scale counts squared, like the amplitude it scales: 2 detuned voices sum to the
     // level of one in NS2 renders (0.85^2 * sqrt 2 = 1.02). Constant-sum pan law: L + R stays 2,
     // as in NS2 renders, where an oscillator panned anywhere keeps the mono sum's level [P].
-    const float g = kScale[n] * kScale[n];
-    v.gainL = g * 2.0f * (1.0f - pan);
-    v.gainR = g * 2.0f * pan;
+    // With STEREO routing the offset moves each oscillator's Pan instead, clamped (Voice::render).
+    const float g = kScale[n] * kScale[n], pan = Noise::clamp01(0.5f + v.uniPan);
+    const bool stereo = patch.route == kRouteStereo;
+    v.gainL = g * (stereo ? 1.0f : 2.0f * (1.0f - pan));
+    v.gainR = g * (stereo ? 1.0f : 2.0f * pan);
   }
 
   // Every pad of the note starts a hit; a pad's group keeps at most its polyphony of hits, choking

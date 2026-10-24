@@ -278,13 +278,16 @@ in both USB modes the board acts as a BLE central (the core's `BLE` library, Blu
 - **F2 and filter routing** ([01](01-architecture.md#filter-routing-rout-mp)):
   - Second filter per voice, per-oscillator `FMix` and `O1BP`. `PARALLEL` and `SERIES` as in
     NS2, and F1 and F2 output `Pan` with the port's linear law.
-  - `STEREO` runs both buses through F1, because F2 runs F1's configuration.
+  - `STEREO` runs both buses through F1, because F2 runs F1's configuration, at half level and
+    doubled after the filter. One filter feeds both sides unless an oscillator is panned (its
+    `Pan`, a `Pan` modulation or the unison's spread); then the right side gets its own copy.
   - Matrix routes to `Filter 2` (Cutoff, Q, Output Gain); `Filter 1+2` reaches both.
-  - Per-oscillator `Pan` is missing. It only matters with `STEREO` routing **[P]**: with
-    `PARALLEL`, NS2 takes at `Pan` 0, 0.25, 0.75 and 1 have the same left-channel level as the
-    centred saw, and 72 of the 74 factory presets that pan an oscillator use `STEREO`. NS2 mixes
-    the oscillators into the buses at `0x1005a6498` (kernels `0x1003af0cc`/`178`/`274` for 1–3
-    oscillators, up to 4 voices per SIMD lane group).
+  - Per-oscillator `Pan` and the `Pan` destination, as measured in NS2
+    ([01](01-architecture.md#filter-routing-rout-mp)). It only matters with `STEREO` routing:
+    with `PARALLEL`, NS2 takes at `Pan` 0, 0.25, 0.75 and 1 have the same left-channel level as
+    the centred saw, and 72 of the 74 factory presets that pan an oscillator use `STEREO`. NS2
+    mixes the oscillators into the buses at `0x1005a6498` (kernels `0x1003af0cc`/`178`/`274` for
+    1–3 oscillators, up to 4 voices per SIMD lane group).
 - **Waveshapers** (`WS Tube/Soft/Hard/Enhance/Sine/Tri`) as an F1, F2 or F3 type, with the
   decompiled curves in 1025-point tables (in the `WaveBank`, PSRAM) and the `Drv` and `WSGn`
   gains ([04](04-filters.md#formant-waveshapers-and-lo-fi-b)). No oversampling: the folders
@@ -369,8 +372,7 @@ Translation of **Abandoned Factory**:
 
 What was left out:
 
-- `Rout=STEREO` with F2 off: the port runs both channels through F1.
-- Per-oscillator pan (LFO4 → Osc2 pan).
+- Per-oscillator pan (LFO4 → Osc2 pan): implemented since.
 - LFO5 → Osc2 pulse width: it is a sine, it has no pulse width.
 - LFO3 → Osc3 phase and `POff`.
 - The pitch envelope (Bipolar with S = 1).
@@ -623,6 +625,16 @@ Findings fixed with this:
   Magic Pitch got worse (4.2 to 8.9 dB) and 1984 slightly (4.4 to 5.4); see
   [03](03-oscillators.md). On the board a synced oscillator costs a few percent of core 1 with four
   notes.
+- `STEREO` routing and oscillator pan, from stereo NS2 takes: the 11 test patches match left and
+  right within 0.02 dB, with `Drv`, two panned oscillators and `Velocity → Pan`. Against the
+  factory takes the gain error went from 8.2 to 2.4 dB on Dirty Saws, 6.5 to 2.4 on Dubstep
+  Crush and 4.1 to 0.7 on Pluck or Pad, and Fat Wide Pad without FX from 3.2 to 0.9.
+- Delay `Cross` and `Pingpong`: stereo takes showed both lines fed by their own channel, with all
+  of `FB` going across. The port fed the sum into the left line only, so a centred note echoed on
+  the left at twice its level; the old `zf03`/`zf04` takes now match echo by echo (±0.6 dB, they
+  were up to 6 dB off). Bell Evolve (`Pingpong`, 0.34 ms) was 7.5 dB loud on the left. Still
+  open: its voice without FX is 4.3 dB louder than NS2's (LFOs on the oscillator levels, an
+  FM-type LFO the port plays as a sine).
 - Level reference: NS2's output level in these takes drifts between sessions (the saw test
   `zz01` came out at −22.6 dB against the port, not −5.6). Record a reference patch in the same
   session and compare against it, not against a fixed gain.

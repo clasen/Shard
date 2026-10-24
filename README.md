@@ -106,7 +106,7 @@ on that pad. A preset that plays samples goes in with `--samples <preset.obs>`, 
 
 ## Status
 
-Single-module test patches (each oscillator type, the filters, envelopes, FM, waveshapers, formant, delay, reverb and chorus) match NanoStudio 2 in level within a dB or two, and most of them in spectrum too. Many full presets match closely. Some still differ by several dB, and a few features are missing: the second decay stage of the envelopes, per-oscillator pan and some matrix destinations. [09 Open questions](docs/obsidian/09-open-questions.md) and [10 Porting notes](docs/obsidian/10-porting-notes.md) track the details.
+Single-module test patches (each oscillator type, the filters, envelopes, FM, waveshapers, formant, delay, reverb and chorus) match NanoStudio 2 in level within a dB or two, and most of them in spectrum too. Many full presets match closely. Some still differ by several dB, and a few features are missing: the second decay stage of the envelopes and some matrix destinations. [09 Open questions](docs/obsidian/09-open-questions.md) and [10 Porting notes](docs/obsidian/10-porting-notes.md) track the details.
 
 ## Legal
 

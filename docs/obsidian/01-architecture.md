@@ -44,7 +44,12 @@ Decompiled from the voice (`0x100403f68`, gains at `0x1004036c0`) **[B]**:
   - `SERIES`: F1's output is added to F2's bus (mono), and F2 goes to the output with its `Pan`.
   - `STEREO`: **F2 uses F1's parameters** (F1's patch is passed when computing F2), and both
     outputs are panned the same way, with ×2 gain. The manual says "F1 left, F2 right" **[M]**.
-    Whether the oscillators' `Pan` splits between the two buses in this mode is **[?]**.
+    Measured **[P]** (stereo takes `zq01`–`zq11`): each oscillator goes `(1 − Pan)` to the left
+    bus and `Pan` to the right one, `FMix` does nothing, and the ×2 comes after the filters, so
+    a centred oscillator drives a ladder like half its level (with `Drv` 0.6 the centred saw is
+    2.2 dB louder than through `PARALLEL`). Pan 0 plays +6 dB on the left and nothing on the
+    right. The unison's pan offset (`pan[N][k]·USte`, [02](02-preset-format.md#unison-b)) moves
+    every oscillator's `Pan`, clamped to 0..1. With the other routings `Pan` does nothing.
 
 `O1BP` (`Osc1Bypass`) = `FILTER` makes oscillator 1 skip the voice filters. The manual also
 mentions bypassing the amplitude envelope; the presets only show the values `OFF` and

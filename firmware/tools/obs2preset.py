@@ -119,7 +119,7 @@ OSC_PARAMS = {"Pitch Coarse": "kDstOscPitch", "Pitch Fine": "kDstOscFine", "Leve
               "FM OP2 Freq": "dstFmRatio(1)", "FM OP3 Freq": "dstFmRatio(2)",
               "NanoSaw Detune": "kDstNsDetune", "NanoSaw Mix": "kDstNsMix", "PD Phase Dist": "kDstPdDist",
               "An Pulse Width": "kDstPulseWidth", "An Sync Ratio": "kDstSyncRatio",
-              "An Sync Hardness": "kDstSyncHardness", "Phase": "kDstOscPhase"}
+              "An Sync Hardness": "kDstSyncHardness", "Pan": "kDstOscPan", "Phase": "kDstOscPhase"}
 PD_WAVES = {"Saw": "kPdSaw", "Square": "kPdSquare", "Pulse": "kPdPulse", "Double Sine": "kPdDoubleSine",
             "Saw Pulse": "kPdSawPulse", "Res Saw": "kPdResSaw", "Res Fat Saw": "kPdResFatSaw",
             "Res Tri": "kPdResTri", "Res Tri HP": "kPdResTriHP"}
@@ -253,7 +253,8 @@ class Converter:
             self.check_default(where, o, "Ring", "0", " (Osc 1 has no previous oscillator)")
         if num(o.get("KeyT")) != 1.0:
             self.emit(f"{q}.keyTrack = {f(num(o.get('KeyT')))};")
-        self.check_default(where, o, "Pan", "0.5")
+        if num(o.get("Pan")) != 0.5:
+            self.emit(f"{q}.pan = {f(num(o.get('Pan')))};")
         if num(o.get("FMix")) != 0.0:
             if self.f2_split:
                 self.emit(f"{q}.filterMix = {f(num(o.get('FMix')))};")

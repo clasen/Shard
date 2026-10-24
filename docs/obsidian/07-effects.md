@@ -95,7 +95,8 @@ The simple Delay shares the processing of the full Delay (`cEffectDelay`, `0x100
     `FB·min(1, 2b)` to one and `FB·min(1, 2 − 2b)` to the other (a linear law, centred at 0.5).
     There is no cross feedback.
   - `Cross` and `Pingpong`: self-feedback is 0 and all of `FB` goes **across** to the other
-    line.
+    line. Each line takes its own channel's input **[P]**: in stereo takes a centred note
+    echoes on both sides at the same level (Pingpong 1:1 and Cross 1:1 with `FB` 0 and 0.5).
 - **Modulated time**: Delay Time modulation is quantized in steps of `1/64` and limited to 1..64
   subdivisions.
 - **Feedback EQ**: `LowCut` and `HighCut` (in the simple version, `EQCut`) enter **squared** as
@@ -107,15 +108,15 @@ The simple Delay shares the processing of the full Delay (`cEffectDelay`, `0x100
 - `Delay Mix` from the matrix is added to that wet level, not to `Mix`: with `Mix` 0 and +0.5
   from a knob, the echo comes out at −6 dB.
 - `FB` 0.5 drops 6 dB per echo, so the feedback is linear.
-- **Cross and Pingpong 1:2** give the same result in mono: the input goes to the L line (`DTim`)
-  and each echo bounces to the other line, of `DTim/2`. With 250 ms, the echoes fall at 250,
-  375, 625, 750 ms…
+- **Cross and Pingpong 1:2** give the same result with a centred input: the L line (`DTim`)
+  and the R line (`DTim/2`) each take their channel, and each echo bounces to the other line.
+  With 250 ms, the left channel echoes at 250, 375, 625, 750 ms…
 - **`EQCt`** is a gentle shelf per pass: with 0.1 it cuts the highs above ~400 Hz by ~3 dB, and
   with 0.9 the lows below ~700 Hz by ~3 dB.
 - 1/8 in tempo gives echoes every 240 ms, because the NS2 project on the Mac runs at 125 BPM.
 
 **In the port** (`syn::Delay`): that model, with two lines of up to 6 s in PSRAM after the
-Multi-FX and before the reverb. Tempo-synced times play at 120 BPM. The tests are within ±1 dB
+Multi-FX and before the reverb. Tempo-synced times play at the engine's tempo. The tests are within ±1 dB
 per echo and per band.
 - In the presets the use is Cross 1:2 (56), Stereo (45) and Pingpong 1:2 (22); the median
   `EQCt` is 0.5.
